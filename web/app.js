@@ -227,6 +227,10 @@
     }));
     body.appendChild(actions);
 
+    if (state.cvText.trim() && fit.percent != null) {
+      const lines = [fit.reason].concat(fit.subDetails || []).filter(Boolean);
+      body.appendChild(el("div", { class: "role-reason", text: "CV fit: " + lines.join(" | ") }));
+    }
     if (sponsor.reason) {
       body.appendChild(el("div", { class: "role-reason", text: sponsor.reason }));
     }
@@ -245,7 +249,11 @@
     const list = document.getElementById("role-list");
     list.innerHTML = "";
     const filtered = DC.filterRoles(state.roles, state.filters, state.statusByUid);
-    const sorted = DC.sortRoles(filtered, state.sortBy);
+    let sorted = DC.sortRoles(filtered, state.sortBy);
+    if (state.sortBy === "cvfit") {
+      const pct = (r) => ((state.evalCache.get(r.uid) || {}).cvFit || {}).percent;
+      sorted = filtered.slice().sort((a, b) => (pct(b) ?? -1) - (pct(a) ?? -1));
+    }
     document.getElementById("role-count").textContent =
       `${sorted.length} of ${state.roles.length} roles`;
     for (const role of sorted) list.appendChild(renderRoleCard(role));
@@ -341,6 +349,9 @@
       } else {
         cvBox.value = await file.text();
       }
+      // Uploading used to only fill the box; the CV did nothing until you
+      // also found and clicked Save, so scores never appeared.
+      document.getElementById("cv-save").click();
     });
 
     const keyInput = document.getElementById("gemini-key");
