@@ -1,0 +1,110 @@
+name: sync vendored skills
+
+# rate-cv ships in two places: its own repository, and vendored into
+# skills/rate-cv here so that cloning job-radar gives you a working set rather
+# than a scanner and a list of things to install separately.
+#
+# Its own repository is the source of truth. This job checks the copy still
+# matches and opens a pull request when it does not, because two copies of the
+# same skill that nobody diffs is how they quietly stop agreeing.
+
+on:
+  schedule:
+    - cron: "30 4 * * 0"   # Sundays, just after source validation
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  # For the failure report at the end.
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # A shallow clone and an rsync. If this is still going after ten minutes
+    # something is wrong, and the default 360 minute limit would hold a runner
+    # for six hours to find that out.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream rate-cv
+        run: |
+          git clone --depth 1 https://github.com/maccydee/rate-cv.git /tmp/rate-cv
+          echo "REV=$(git -C /tmp/rate-cv rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Copy over the vendored version
+        run: |
+          rm -rf skills/rate-cv
+          mkdir -p skills/rate-cv
+          rsync -a --exclude '.git' --exclude '.github' /tmp/rate-cv/ skills/rate-cv/
+          # This was a `sed -i -E "s|...|...|"` whose replacement text was a
+          # markdown table row, so it contained the delimiter. sed read the
+          # third `|` as the end of the substitution and the rest as flags,
+          # failed with "bad flag in substitute command", and `|| true`
+          # swallowed it. The vendored copy was being updated while the row
+          # recording which revision was vendored stayed pinned at acca44e,
+          # which is the one thing that table exists to say.
+          #
+          # No `|| true` now either. If the row is not there, the table has
+          # been edited and this needs a person, not a silent pass.
+          python3 - <<'PY'
+          import os, pathlib, re
+
+          p = pathlib.Path("skills/README.md")
+          text = p.read_text(encoding="utf-8")
+          pat = re.compile(
+              r"^(\| `rate-cv` \| \[maccydee/rate-cv\]"
+              r"\(https://github\.com/maccydee/rate-cv\) \| )`[^`]*`( \|)$", re.M)
+          new, n = pat.subn(lambda m: f"{m.group(1)}`{os.environ['REV']}`{m.group(2)}",
+                            text)
+          if n != 1:
+              raise SystemExit(
+                  f"skills/README.md: expected one rate-cv revision row, found {n}. "
+                  "The table was edited; update this workflow to match it.")
+          p.write_text(new, encoding="utf-8")
+          PY
+
+      - name: Open a pull request if it drifted
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/sync-rate-cv
+          title: "Sync vendored rate-cv to ${{ env.REV }}"
+          body: |
+            The vendored copy of `rate-cv` no longer matches
+            [maccydee/rate-cv](https://github.com/maccydee/rate-cv).
+
+            This pull request replaces `skills/rate-cv/` with upstream at
+            `${{ env.REV }}`. If the diff contains changes that were made here
+            rather than upstream, that is the bug: edits belong in the source
+            repository, not in this copy.
+          add-paths: |
+            skills/**
+          commit-message: "skills: sync rate-cv to ${{ env.REV }}"
+          delete-branch: true
+
+      - name: Report a failed run
+        if: failure()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # One open notice, not one per failed run. A job that fails every
+          # night for a week is one problem, and seven identical issues make
+          # it look like seven. `|| true` throughout: a fork with Issues
+          # disabled must not fail the job over its own notifications.
+          gh issue list --state open --search 'in:title "Vendored skill sync failed:"' \
+            --json number --jq '.[].number' 2>/dev/null | while read -r n; do
+              [ -n "$n" ] && gh issue close "$n" \
+                --comment "Superseded by a later run." >/dev/null 2>&1 || true
+          done || true
+          gh issue create \
+            --title "Vendored skill sync failed: run ${{ github.run_id }}" \
+            --body "The weekly rate-cv sync did not finish, so \`skills/rate-cv\` may now be behind its own repository.
+
+          Log: ${RUN_URL}
+
+          Nothing was committed. This issue is filed once per failed run and is safe to close." \
+            || echo "could not file an issue"
