@@ -1,0 +1,111 @@
+# job-radar config
+# Everything the tool does is decided here. Edit freely; re-running
+# `job-radar setup` rewrites this file, comments and all.
+
+titles:
+  # Roles you want. Matched against the posting title.
+  include:
+    - Network Automation Engineer
+    - Infrastructure Engineer
+    - DevOps Engineer
+    - Systems Engineer
+    - Network Engineer
+    - Site Reliability Engineer
+    - Cloud Engineer
+  # Titles to never show you, even if they match above.
+  exclude:
+    - Helpdesk Technician
+    - Support Specialist
+    - Pre-Sales Engineer
+    - Account Manager
+    - Security Clearance Required
+    - US Citizen Only
+
+locations:
+  countries:
+    - UK
+  remote_ok: true
+  # Keep only these arrangements: remote, hybrid, office. Empty means all.
+  work_modes: []
+  # Places you would move to. Scored lower than home, but still shown.
+  relocate_to:
+    - IE
+    - DE
+    - NL
+  # Countries where you would need a visa. Roles there that state they will
+  # not sponsor are hidden; everywhere else the fact is only reported.
+  need_sponsorship:
+    - UK
+    - IE
+    - DE
+    - NL
+  # Never show roles in these places.
+  exclude: []
+
+cv:
+  # On a GitHub Actions runner there is no local CV file, and this repo
+  # being public means your real CV should never be committed here (see
+  # SETUP.md). cv.path pointing at a file that doesn't exist on the runner
+  # is fine: jobradar/sponsor_check.py already catches that and continues
+  # the scan without CV-based scoring, rather than failing the run -- CV fit
+  # is instead computed client-side, in your own browser, on the public
+  # dashboard (web/), where you paste your real CV and it never leaves it.
+  path: 'cv.md'
+
+salary:
+  # A role whose STATED pay is below this is hidden.
+  # A role with NO stated pay is always shown, marked "unconfirmed salary".
+  floor: 45000
+  currency: GBP
+
+# Read against the job description. A `hard` match hides the role.
+dealbreakers: []
+
+# Which employers to watch. Empty means all of them.
+sectors: []
+
+sources:
+  use_bundled: true
+  # "workable" is ~2,094 individual employer boards, paced slowly enough to
+  # dominate scan time; "workable_recent" and "workable_search" (separate
+  # platform names, not excluded here) sweep the same employers' recent
+  # postings far faster.
+  exclude_platforms:
+    - linkedin
+    - workable
+  # Limit the bundled list to where you'd actually take the role.
+  countries: [UK, IE, DE, NL]
+  # The "only scan what's actually useful" switch -- an employer's own
+  # board is read only if that employer matches the UK sponsor register.
+  # Searches that return many employers at once (Reed, Adzuna, NHS Jobs,
+  # the Workable sweeps) are never affected by this.
+  sponsor_focus: true
+  # Boards added by `job-radar discover --add`.
+  extra: []
+
+output:
+  formats: [html, json]
+  dir: out
+
+fetch:
+  concurrency: 64
+  timeout: 20
+  retries: 2
+
+freshness:
+  max_age_days: 4
+
+sponsor_check:
+  # Sponsor-check runs on every scan for free (no model call). Any role
+  # whose combined worth-applying score comes back below this is
+  # auto-skipped right after enrichment.
+  skip_below: 40
+  # A role whose description is still under 200 characters after
+  # enrichment has nothing real behind it to score against -- skip it.
+  require_description: true
+  # Left unset here (rather than 40, as in the local config) because with
+  # no CV on the runner, cv_pct is always None on this repo's scans, and a
+  # None cv_pct is never auto-skipped by this check regardless of the
+  # number -- so setting it here would do nothing except look misleading.
+  # CV-fit filtering happens in your browser on the dashboard instead.
+  cv_fit_skip_below: null
