@@ -1,5 +1,5 @@
 {
- "runs": 7,
+ "runs": 8,
  "seen": {
   "047f045ed736191f": {
    "company": "Trusteq Gmbh",
@@ -439,6 +439,12 @@
    "last_seen": "2026-10-04",
    "title": "Experienced IT Systems Engineer"
   },
+  "a7a2c70819fb2035": {
+   "company": "MongoDB",
+   "first_seen": "2026-10-04",
+   "last_seen": "2026-10-04",
+   "title": "Associate Technical Services Engineer II (Cloud)"
+  },
   "ae8190ec157204ac": {
    "company": "Iceye",
    "first_seen": "2026-10-04",
@@ -656,7 +662,7 @@
   "https://americanregent.wd1.myworkdayjobs.com/wday/cxs/americanregent/American_Regent_Careers/jobs": 0,
   "https://amgen.wd1.myworkdayjobs.com/wday/cxs/amgen/Careers/jobs": 265,
   "https://amnesty-international-deutschland.jobs.personio.de/xml": 2,
-  "https://ampack.jobs.personio.de/xml": 19,
+  "https://ampack.jobs.personio.de/xml": 21,
   "https://ams-technologies-ag.jobs.personio.de/xml": 1,
   "https://amsta.recruitee.com/api/offers/": 99,
   "https://amswh.avature.net/careers/SearchJobs/?jobRecordsPerPage=50": 7,
@@ -740,7 +746,7 @@
   "https://api.ashbyhq.com/posting-api/job-board/circuithub?includeCompensation=true": 8,
   "https://api.ashbyhq.com/posting-api/job-board/claimsorted?includeCompensation=true": 18,
   "https://api.ashbyhq.com/posting-api/job-board/clearbank?includeCompensation=true": 7,
-  "https://api.ashbyhq.com/posting-api/job-board/clera?includeCompensation=true": 276,
+  "https://api.ashbyhq.com/posting-api/job-board/clera?includeCompensation=true": 272,
   "https://api.ashbyhq.com/posting-api/job-board/climatiq?includeCompensation=true": 1,
   "https://api.ashbyhq.com/posting-api/job-board/clipboard?includeCompensation=true": 37,
   "https://api.ashbyhq.com/posting-api/job-board/coachhub%20careers?includeCompensation=true": 1,
@@ -2172,7 +2178,7 @@
   "https://careers-wilmingtonplc.icims.com/jobs/search?ss=1&in_iframe=1": 10,
   "https://careers-wrhrealty.icims.com/jobs/search?ss=1&in_iframe=1": 14,
   "https://careers.allianz.com/es/es/search-results?s=1": 7,
-  "https://careers.bcg.com/jp/ja/search-results?s=1": 331,
+  "https://careers.bcg.com/jp/ja/search-results?s=1": 330,
   "https://careers.clarksons.com/search/?q=&sortColumn=referencedate&sortDirection=desc": 19,
   "https://careers.energean.com/search/?q=&sortColumn=referencedate&sortDirection=desc": 13,
   "https://careers.ey.com/search/?q=&sortColumn=referencedate&sortDirection=desc": 143,
@@ -2193,7 +2199,7 @@
   "https://careers.serco.com/gb/en/search-results?s=1": 70,
   "https://careers.tateandlyle.com/global/en/search-results?s=1": 15,
   "https://careers.tesco.com/en_GB/careersmarketplace/SearchJobs/?jobRecordsPerPage=50": 45,
-  "https://careers.thalesgroup.com/global/en/search-results": 264,
+  "https://careers.thalesgroup.com/global/en/search-results": 262,
   "https://careers.unifiservice.com/careers/SearchJobs/?jobRecordsPerPage=50": 0,
   "https://careers.wizzair.com/search/?q=&sortColumn=referencedate&sortDirection=desc": 62,
   "https://careersat-ohsu.icims.com/jobs/search?ss=1&in_iframe=1": 17,
@@ -2453,7 +2459,7 @@
   "https://fa-eqie-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 53,
   "https://fa-eqnk-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 31,
   "https://fa-eqvg-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 60,
-  "https://fa-eqzh-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 193,
+  "https://fa-eqzh-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 192,
   "https://fa-erav-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 117,
   "https://fa-errt-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 199,
   "https://fa-ertb-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 200,
@@ -2742,7 +2748,7 @@
   "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=Germany": 47,
   "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=Ireland": 17,
   "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=Netherlands": 34,
-  "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=United+Kingdom": 253,
+  "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=United+Kingdom": 254,
   "https://jobs1-spectrumhealthcare.icims.com/jobs/search?ss=1&in_iframe=1": 10,
   "https://jobs2-spectrumhealthcare.icims.com/jobs/search?ss=1&in_iframe=1": 1,
   "https://jobsatlanticlabsfoodlabs.recruitee.com/api/offers/": 11,
