@@ -137,16 +137,15 @@ preamble, no code fence, nothing else.`);
     return parts.join("\n\n");
   }
 
-  function buildCoverLetterPrompt(role, cvDraftText, cvSourceText) {
+  function buildCoverLetterPrompt(role, cvText) {
     const parts = [UNTRUSTED];
     parts.push(`--- job description ---\n${role.title || "Untitled role"} at ${role.company || ""}\n\n${role.description || "(no description available)"}`);
-    parts.push(`--- the CV already drafted for this role ---\n${cvDraftText}`);
-    parts.push(`--- the candidate's real CV, plain text ---\n${cvSourceText}`);
+    parts.push(`--- the candidate's own CV, plain text ---\n${cvText}`);
     parts.push(`Draft a cover letter for the role above.
 
-The letter must share no phrasing with the CV quoted above. The CV carries
-the facts and the metrics; the letter carries judgement, motivation and how
-the candidate works. No sequence of six or more words may appear in both.
+The CV carries the facts and the metrics; the letter carries judgement,
+motivation and how the candidate works. The letter must share no phrasing
+with the CV: no sequence of six or more words may appear in both.
 
 WHO READS IT. A hiring manager at a different company who has never
 worked where the candidate works. Expand an acronym the first time it
@@ -155,9 +154,9 @@ appears, or cut it.
 LENGTH. 250 to 350 words, four or five short paragraphs, one page.
 
 Rules that are not negotiable:
-- Every number, date, scale and frequency must already be in the real CV
+- Every number, date, scale and frequency must already be in the CV
   quoted above. Do not add one that is not there.
-- Never claim experience that is not in the real CV.
+- Never claim experience that is not in the CV.
 - Name what draws the candidate to this company and this team, pointing at
   something specific in the posting -- in the candidate's own words, not
   the posting's vocabulary.
