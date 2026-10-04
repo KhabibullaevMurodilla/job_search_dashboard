@@ -67,7 +67,13 @@
       return;
     }
     const data = await rolesRes.json();
-    state.roles = (data.new || []).concat(data.seen || []);
+    // job-radar's own CLI (jobradar/output/__init__.py) writes this second
+    // bucket as "matching", not "seen" -- confirmed against the real
+    // scan output. On a first-ever scan every role is "new" so this bug
+    // was invisible; from the second scan on, roles that were seen before
+    // move into "matching" and this dashboard would silently stop showing
+    // them, trending toward an empty list over time.
+    state.roles = (data.new || []).concat(data.matching || []);
     state.meta = data.meta || {};
     if (registersRes && registersRes.ok) {
       state.registers = DC.registersFromJson(await registersRes.json());
