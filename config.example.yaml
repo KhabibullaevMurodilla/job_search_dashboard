@@ -1,0 +1,166 @@
+# job-radar config
+#
+# Copy this to config.yaml and edit, or run `job-radar setup` to be asked.
+# This example is set up for an engineering manager in the UK; replace the
+# titles and dealbreakers with your own and it works for any field.
+
+titles:
+  # Matched against the posting title.
+  include:
+    - engineering manager
+    - senior engineering manager
+    - head of engineering
+    - director of engineering
+  # Never show these, even if they match above.
+  exclude:
+    - product manager
+    - programme manager
+    - account manager
+    - sales
+
+locations:
+  countries:
+    - UK
+  remote_ok: true
+  # Keep only these arrangements: remote, hybrid, office.
+  # Empty keeps all of them, which is the default.
+  # `remote_ok: true` shows remote AND everything else; it cannot say
+  # "remote only". This can: work_modes: [remote]
+  # A posting that does not state an arrangement is always kept and
+  # flagged, because half of them do not say.
+  work_modes: []
+  # Somewhere you would move to. Shown, but scored below home.
+  relocate_to: []
+  # Countries where you would need a visa. A role in one of these that says
+  # outright it will not sponsor is dropped: you cannot take it however good
+  # the fit. A role that says it will sponsor is scored up. Silence is kept,
+  # flagged, and left for you to ask about. Leave empty if you can work
+  # anywhere you have listed above.
+  need_sponsorship: []
+  # Never show roles here.
+  exclude: []
+
+cv:
+  # Your current CV. REQUIRED. Everything that drafts a document works from
+  # it, and without it the tool would be inventing a career rather than
+  # tailoring one. .docx, .pdf, .md and .txt all work.
+  # `job-radar setup` asks for this and will not finish without a real file.
+  path: ~/Documents/my-cv.docx
+
+salary:
+  # A role whose STATED pay is below this is hidden.
+  # A role with NO stated pay is shown and marked "unconfirmed salary".
+  # Most employers still publish no figure, so hiding those would throw away
+  # most of the market. Only a stated number can disqualify a role.
+  floor: null
+  currency: GBP
+
+# Read against the job description. A `hard` match hides the role;
+# `hard: false` shows it with a warning instead.
+dealbreakers:
+  - name: coding round
+    pattern: "take.?home|live coding|coding (?:test|assessment|challenge|exercise)"
+    hard: true
+  - name: pre-sales
+    pattern: "pre.?sales|solutions? (?:architect|engineer)|forward deployed"
+    hard: true
+  - name: manages managers
+    pattern: "managing managers|manager of managers|people managers report"
+    hard: false
+
+# Which employers to watch. Empty means all of them.
+# These are the tags that actually exist in the bundled list. A sector not in
+# this list matches nothing. Check yours with `job-radar coverage`.
+# charity, construction, education, energy, finance, healthcare, hospitality, industry, legal, media, professional-services, public-sector, retail, security, technology, telecoms, transport, travel
+# Full reference: docs/CONFIG.md
+sectors: []
+
+sources:
+  use_bundled: true
+  # Limit the bundled list by country. Empty means all.
+  countries: []
+
+  # Reed (reed.co.uk) is one of the two sources that need a credential, Adzuna
+  # below being the other, and one of the three aggregators here alongside
+  # Adzuna and LinkedIn. Everything else in the bundled list is one employer's
+  # own job board, which only reaches employers somebody has added; Reed is
+  # searched by keyword and reaches its whole UK market at once, which is
+  # where the mid-size employers are.
+  #
+  # The key is free: fill in the short form at
+  # https://www.reed.co.uk/developers/jobseeker and it is emailed to you.
+  # There is no card and no paid tier. Leave this empty and the Reed source
+  # below is skipped with a message; nothing else changes.
+  #
+  # DO NOT put a real key here if this file is `config.yaml`: that one is
+  # committed. Put it in `config.local.yaml`, which is gitignored, or leave
+  # this blank and export REED_API_KEY instead.
+  reed_api_key: ""
+
+  # Adzuna (adzuna.com) is the second keyed aggregator, and the only source
+  # here that can watch more than one country from the same config: it runs
+  # nineteen national indexes and the country is two letters in the URL path,
+  # so `gb` becomes `us`, `ca` or `au` for the places you would move to. There
+  # is no United Arab Emirates index.
+  #
+  # Free, self-serve, no card: register at https://developer.adzuna.com/signup
+  # and the dashboard shows both values. Leave them empty and the Adzuna source
+  # below is skipped with a message; nothing else changes.
+  #
+  # The free limits are 25 calls a minute, 250 a day, 1,000 a week and 2,500 a
+  # month. One scan is one call per title per page, so six titles at up to
+  # three pages is 18 calls, and the monthly cap works out at about four scans
+  # a day. Adding a second country doubles it.
+  #
+  # Same warning as Reed: DO NOT put real values here if this file is
+  # `config.yaml`, which is committed. Use `config.local.yaml`, which is
+  # gitignored, or export ADZUNA_APP_ID and ADZUNA_APP_KEY.
+  adzuna_app_id: ""
+  adzuna_app_key: ""
+
+  # Boards you added yourself, or that `job-radar discover --add` found.
+  extra: []
+    # Reed. Uncomment to switch it on. `{keyword}` is expanded into one search
+    # per entry in titles.include, the same way NHS Jobs works, so this single
+    # line becomes up to six searches.
+    #
+    # `postedByDirectEmployer=true` asks Reed for employers only. Reed lists
+    # the same vacancy once per agency that has been given it, and the API
+    # exposes no per-result flag saying which sort of listing you are looking
+    # at, so the query is the only place the duplicates can be cut. Swap it
+    # for `postedByRecruitmentAgency=true`, or drop it entirely, if you do
+    # want agency listings.
+    # - company: Reed
+    #   url: "https://www.reed.co.uk/api/1.0/search?keywords={keyword}&postedByDirectEmployer=true"
+    #   platform: reed
+    #   country: UK
+    #   keyword_template: true
+
+    # Adzuna. Uncomment to switch it on. `{keyword}` expands per title, as
+    # above. `title_only` rather than `what` on purpose: `what` searches the
+    # advert body, so "engineering manager" returns every engineer whose
+    # advert mentions their manager, and you pay a call for each page of it.
+    #
+    # The `gb` in the path is the country. Copy the line with `us`, `ca` or
+    # `au` to watch somewhere you would relocate to; the adapter reads the
+    # country and the currency out of the path, so nothing else changes.
+    # - company: Adzuna
+    #   url: "https://api.adzuna.com/v1/api/jobs/gb/search/1?title_only={keyword}&results_per_page=50"
+    #   platform: adzuna
+    #   country: UK
+    #   keyword_template: true
+
+output:
+  formats: [html, json]
+  dir: out
+
+fetch:
+  # How many DIFFERENT job boards are read at once. It is not how hard any one
+  # of them is hit: each host is paced on its own clock (roughly 3 requests a
+  # second, and slower for the strict ones), so this number can be generous
+  # without being rude. It has to be, because around 7,748 of the bundled hosts
+  # carry a single board each and reading those four at a time costs an hour.
+  # Capped at 64, which is about your own sockets rather than their servers.
+  concurrency: 16
+  timeout: 20
+  retries: 2
