@@ -1,0 +1,89 @@
+# API keys and secrets. Never commit this -- a public repo (the GitHub
+# Actions + Pages setup in SETUP.md requires one) makes anything committed
+# visible to anyone, forever, even after a later commit removes it.
+.env
+*.env
+.env.*
+
+# Your real CV, in any format. The public dashboard (web/) reads a CV you
+# paste into your own browser, never one committed to the repo -- see
+# SETUP.md for why DRAFT_DOCS (the server-side auto-draft step, which needs
+# a committed CV) has to stay off here. Keep yours as cv.md locally; this
+# line stops it from ever being `git add`-ed by accident.
+cv.md
+cv.local.*
+
+# Your own settings, kept out of the repo.
+#
+# config.yaml and state/ are both ignored here and both have to be committed
+# on a fork that uses the GitHub Actions path: a fresh runner has no memory,
+# so an uncommitted config is a config it cannot see. `git add -f` them there.
+# That is one deliberate flag, against a file that is otherwise impossible to
+# commit by accident.
+#
+# config.yaml was tracked until 2026-08-25, which meant `job-radar setup` on a
+# fresh clone reported "Wrote config.yaml" and `git status` reported a
+# modified tracked file. Every later pull conflicted. Untracking it was not
+# enough on its own: an untracked file that is not ignored is one `git add -A`
+# away from being tracked again, which is exactly what happened within the
+# hour, so it is ignored as well.
+#
+# If you want a private config even on a public fork, put it in
+# config.local.yaml, which the CLI prefers over config.yaml.
+config.yaml
+config.local.yaml
+*.local.yaml
+
+# Scan output. Regenerated every run; publish it via Pages rather than commits.
+out/
+
+# Maintainer working files. The harvester lives in a separate private repo;
+# these are what it leaves behind if it is run from here.
+harvest/
+raw/
+*.checkpoint.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+
+# Your scan history. NOT ignored for forks that use the Actions path, which
+# have to commit it: see the note in the README. It is ignored here because
+# this is the upstream repo and the maintainer's own search history has no
+# business being in it.
+state/
+
+# Your application history. Personal, and not the tool's business.
+applications.local.yaml
+
+# The database. Holds your application history and document paths.
+data/
+*.db
+.backups/
+
+# Raw output from tools/probe_rate_limit.py. 571 requests of headers and
+# statuses, and the conclusions drawn from it live in tests/test_rate_model.py
+# and docs/PLATFORMS.md, which is where a reader will look. The log is the
+# working, not the finding.
+tools/rate_probe_log.jsonl
+
+# A downloaded or locally built shard set. Tens of megabytes of somebody
+# else and regenerable from `job-radar seed build`, so it has no business in
+# anybody history.
+seed/
+seed-build/
+seed-build.new/
+.seed-cache/
+
+# Local scan logs. Run output, not source, and it names the boards you scan.
+logs/
