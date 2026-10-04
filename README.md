@@ -11,8 +11,7 @@ and the scoring logic are that project's work. What's in this repo on top of
 it:
 
 - **A public web dashboard** (`web/`) — browse scored roles and draft
-  documents from any browser, no install, no login. See
-  [SETUP.md](SETUP.md).
+  documents from any browser, no install, no login.
 - **A Chrome extension** (`extension/`) — the same sponsor/CV-fit scoring
   overlaid on a job posting while you're reading it on the actual site.
 - **A free GitHub Actions pipeline** (`.github/workflows/`, `scripts/`) —
@@ -73,9 +72,9 @@ skip the launcher entirely.)
 
 ## Running it for free on GitHub, with a public dashboard
 
-See [SETUP.md](SETUP.md) for the full walkthrough: a public repo, a
+See for the full walkthrough: a public repo, a
 scheduled scan with no server and no cost, and a dashboard at
-`https://<you>.github.io/<repo>/` that anyone can use — each visitor's CV,
+`https://khabibullaevmurodilla.github.io/job_search_dashboard/` that anyone can use — each visitor's CV,
 API key and applied/skipped choices stay in their own browser, never in
 this repo.
 
