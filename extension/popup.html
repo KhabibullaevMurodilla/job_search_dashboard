@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sponsor Check</title>
+<style>
+  body { width: 280px; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 16px; color: #1d1d1f; background: #fff; }
+  h1 { font-size: 15px; margin: 0 0 12px; font-weight: 700; }
+  .row { display: flex; justify-content: space-between; align-items: center;
+         font-size: 13px; margin-bottom: 8px; color: #3a3a3c; }
+  .row b { color: #1d1d1f; }
+  .ok { color: #1a7a4a; }
+  .warn { color: #9a6114; }
+  button { width: 100%; font: inherit; font-size: 13px; font-weight: 600; padding: 9px;
+           border-radius: 8px; border: 1px solid #2563a8; background: #2563a8; color: #fff;
+           cursor: pointer; margin-top: 6px; }
+  button.secondary { background: transparent; color: #2563a8; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { font-size: 11px; color: #6e6e73; margin-top: 10px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>Sponsor Check</h1>
+  <div class="row"><span>CV loaded</span><b id="cv-status">checking&hellip;</b></div>
+  <div class="row"><span>UK sponsor register</span><b id="register-status">checking&hellip;</b></div>
+  <button id="check-page">Check this page</button>
+  <button id="open-options" class="secondary">Add / update CV</button>
+  <p class="hint">The badge on job posting pages appears automatically when the page
+    looks like a job listing. Use "Check this page" for a board that doesn't
+    auto-detect.</p>
+  <script src="popup.js"></script>
+</body>
+</html>

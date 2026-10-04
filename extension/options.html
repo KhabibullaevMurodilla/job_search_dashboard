@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sponsor Check &mdash; CV</title>
+<style>
+  body { font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+         max-width: 640px; margin: 40px auto; padding: 0 20px; color: #1d1d1f; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  p.sub { color: #6e6e73; margin-top: 0; }
+  .card { border: 1px solid #e8e8ed; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+  textarea { width: 100%; min-height: 220px; font: 13px/1.5 ui-monospace, monospace;
+             padding: 10px; border-radius: 8px; border: 1px solid #d0d0d5; resize: vertical; }
+  input[type=file] { display: block; margin-bottom: 14px; }
+  button { font: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px;
+           border-radius: 8px; border: 1px solid #2563a8; background: #2563a8; color: #fff;
+           cursor: pointer; }
+  button.secondary { background: transparent; color: #2563a8; }
+  .status { font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .status.ok { color: #1a7a4a; }
+  .status.err { color: #b23c3c; }
+  .muted { color: #6e6e73; font-size: 12px; line-height: 1.6; }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+</style>
+</head>
+<body>
+  <h1>Sponsor Check</h1>
+  <p class="sub">Your CV, read once here and kept in this browser only &mdash; it is
+    never uploaded anywhere, and is used only to compute the CV-fit score you
+    see on job postings.</p>
+
+  <div class="card">
+    <label for="cv-file">Upload a CV file (.pdf or .txt)</label>
+    <input type="file" id="cv-file" accept=".pdf,.txt">
+    <label for="cv-text">...or paste your CV text directly</label>
+    <textarea id="cv-text" placeholder="Paste your CV's text here"></textarea>
+    <div class="row">
+      <button id="save">Save CV</button>
+      <button id="clear" class="secondary">Remove saved CV</button>
+    </div>
+    <div id="status" class="status"></div>
+    <p class="muted">A .docx CV isn't read directly here &mdash; export it as
+      PDF or plain text first (most word processors offer "Save as PDF").
+      This mirrors exactly how job-radar's own dashboard reads a CV, so the
+      score here and the score there should agree.</p>
+  </div>
+
+  <div class="card">
+    <label>UK sponsor register</label>
+    <div id="register-info" class="muted">Checking&hellip;</div>
+    <div class="row"><button id="refresh-register" class="secondary">Refresh now</button></div>
+    <p class="muted">Downloaded directly from GOV.UK's published register of
+      licensed sponsors and re-checked automatically about once a week &mdash;
+      the same source and refresh schedule job-radar's own sponsor-check uses.</p>
+  </div>
+
+  <script src="lib/pdf.min.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+/*
+ * `#sponsor-check-badge *{all:revert}` below exists to stop the host page's
+ * own CSS (its own `button{...}`, `ul{...}`, `h1{...}` rules, or a global
+ * reset of its own) from bleeding into the badge -- but a plain class
+ * selector like `.sc-pill{...}` has LOWER specificity than an ID-anchored
+ * universal selector like `#sponsor-check-badge *`, so it was losing to its
+ * own reset regardless of which came later in the file: every rule below
+ * used to render at browser defaults (a grey system button, a plain block
+ * of black-on-white text with no card, no width, no dark background), which
+ * is the unstyled shape that was sprawling across the page. Every selector
+ * here is written as `#sponsor-check-badge .sc-x` (or the id itself) so it
+ * carries the same ID-level specificity as the reset and actually wins.
+ */
+#sponsor-check-badge,
+#sponsor-check-badge * {
+  all: revert;
+  box-sizing: border-box;
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+#sponsor-check-badge {
+  position: fixed;
+  /* LinkedIn (and several other job boards) keep their own fixed messaging/
+     chat widget pinned to this exact corner, which can sit on top of, or be
+     sat on top of, anything else parked at bottom:20px -- either way the
+     badge is easy to lose against it. Lifted clear of that. */
+  bottom: 92px;
+  right: 20px;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100vw - 40px);
+}
+#sponsor-check-badge .sc-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1d1d1f;
+  color: #f5f5f7;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+}
+#sponsor-check-badge .sc-pill:hover { background: #2c2c2e; }
+#sponsor-check-badge .sc-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #9b9ba3; flex: 0 0 auto;
+}
+#sponsor-check-badge .sc-dot.sc-good { background: #5fbf8d; }
+#sponsor-check-badge .sc-dot.sc-mid { background: #d8a55a; }
+#sponsor-check-badge .sc-dot.sc-low { background: #d98080; }
+#sponsor-check-badge .sc-scores { display: flex; gap: 6px; }
+#sponsor-check-badge .sc-chip {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #38383a;
+  color: #f5f5f7;
+}
+#sponsor-check-badge .sc-chip.sc-good { background: rgba(95,191,141,.28); color: #8fe0b6; }
+#sponsor-check-badge .sc-chip.sc-mid { background: rgba(216,165,90,.28); color: #f0c583; }
+#sponsor-check-badge .sc-chip.sc-low { background: rgba(217,128,128,.28); color: #f0a3a3; }
+#sponsor-check-badge .sc-panel {
+  display: block;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  color: #1d1d1f;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.28);
+  padding: 16px 18px 14px;
+  position: relative;
+  font-size: 13px;
+  line-height: 1.5;
+}
+#sponsor-check-badge .sc-panel[hidden] { display: none; }
+#sponsor-check-badge .sc-panel .sc-close {
+  position: absolute;
+  top: 8px; right: 10px;
+  background: none; border: none;
+  font-size: 20px; line-height: 1; cursor: pointer;
+  color: #6e6e73;
+}
+#sponsor-check-badge .sc-panel .sc-job {
+  display: block;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 10px;
+  padding-right: 20px;
+}
+#sponsor-check-badge .sc-panel h4 {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #6e6e73;
+  margin: 14px 0 4px;
+  font-weight: 700;
+}
+#sponsor-check-badge .sc-panel h4:first-of-type { margin-top: 0; }
+#sponsor-check-badge .sc-panel p { display: block; margin: 0 0 6px; }
+#sponsor-check-badge .sc-panel ul { display: block; margin: 0 0 6px; padding-left: 18px; list-style: disc; }
+#sponsor-check-badge .sc-panel li { display: list-item; margin-bottom: 4px; }
+#sponsor-check-badge .sc-panel .sc-muted { color: #6e6e73; }
+#sponsor-check-badge .sc-panel .sc-warn { color: #b23c3c; }
+#sponsor-check-badge .sc-panel .sc-footer {
+  display: block;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e8e8ed;
+  color: #9b9ba3;
+  font-size: 11px;
+}
+@media (prefers-color-scheme: dark) {
+  #sponsor-check-badge .sc-panel { background: #1c1c1e; color: #f5f5f7; }
+  #sponsor-check-badge .sc-panel .sc-footer { border-top-color: #38383a; }
+}
