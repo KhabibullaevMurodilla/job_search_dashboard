@@ -1,0 +1,363 @@
+name: scan
+
+# Fork this repo, commit a `config.yaml`, then uncomment the `schedule:` block
+# below. It does NOT run on its own until you do: a fork inherits the workflow
+# with its cron disabled, which is deliberate so a fork does not start hitting
+# job boards the moment somebody clicks Fork.
+#
+# `config.yaml` is gitignored, so a fresh fork has no config at all and the
+# scan below stops on "No config at config.yaml". Committing it takes a
+# deliberate flag:
+#
+#     job-radar setup            # or copy config.example.yaml and edit it
+#     git add -f config.yaml     # the -f is required, it is an ignored file
+#     git commit -m "my config" && git push
+#
+# You do NOT need to add `state/`; the commit step below force-adds it on
+# every run. Put API keys in `config.local.yaml`, never in `config.yaml`: on a
+# public fork the committed config is readable by anyone.
+#
+# Two more things worth knowing before you rely on it:
+#
+#  * Actions runners share IP ranges with a very large number of other repos,
+#    so job boards throttle them sooner than they throttle your laptop. The
+#    scan reports sources that look throttled rather than pretending they were
+#    empty, but if you see a lot of them, run it locally instead.
+#  * State is committed back to this repo, not cached. The Actions cache is
+#    evicted after 7 days of no use, which would make every role look new
+#    again.
+
+on:
+  # The schedule is commented out ON THIS REPOSITORY on purpose.
+  #
+  # This repo is public, and a scan publishes what it found: the state commit,
+  # the issue, and the dashboard artifact are all readable by anyone, including
+  # unauthenticated strangers via the API. That is fine for a tool and wrong
+  # for the maintainer's own job search.
+  #
+  # If you have forked this, uncomment the two lines below. Do it knowing that
+  # on a public fork your search becomes public too; see the README. On a
+  # private fork it stays yours, and Actions is free there as well.
+  #
+  # schedule:
+  #   - cron: "0 7 * * 1-5"   # 07:00 UTC, weekdays
+  workflow_dispatch:
+
+# Declared per job rather than here. The scan job needs to write commits and
+# open issues; the publish job needs Pages and an OIDC token and nothing else.
+# Granting all four to both meant the step that fetches several thousand
+# third-party job boards held a token that could deploy the site.
+permissions: {}
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # commit state/seen.json
+      issues: write       # post new roles, and report a failed run
+    # A full pass over the bundled list is not quick: 2,094 of the 17,807
+    # boards are on apply.workable.com, which is paced at 0.7 requests a
+    # second, so that host alone is a 50 minute floor before anything else is
+    # counted. GitHub kills a job at 360 minutes regardless, so the useful
+    # thing is not a shorter deadline but a deadline that leaves the reporting
+    # steps room to run: the Scan step below gets 300 minutes, and if it burns
+    # them the job still has time to commit whatever state exists and to say
+    # that it failed.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e .
+
+      - name: Check there is a config to scan with
+        # `config.yaml` stopped being tracked on 2026-08-25 and is gitignored,
+        # so a fork that has not force-added its own gets a checkout with no
+        # config in it. Without this the run dies four minutes later inside the
+        # scan, on a message that tells a runner to go and run `job-radar
+        # setup` interactively, which is not a thing a runner can do.
+        run: |
+          if [ ! -f config.yaml ] && [ ! -f config.local.yaml ]; then
+            echo "::error::No config.yaml in this checkout. It is gitignored, so a fork has to commit it deliberately: job-radar setup, then git add -f config.yaml && git commit && git push. See the comment at the top of this workflow."
+            exit 1
+          fi
+
+      - name: Scan
+        id: scan
+        timeout-minutes: 300
+        run: job-radar scan --out out
+
+      - name: Commit what we have seen
+        # always(), so that state computed by a scan that then fell over in a
+        # later step is not thrown away. The guards below decide whether the
+        # file is worth committing; the outcome of the scan step does not.
+        if: always()
+        run: |
+          # state/ is gitignored so that the upstream repo never carries the
+          # maintainer's own search history. A fork running this DOES need it
+          # committed, or every run starts blank, nothing is ever "new", and
+          # no issue is ever posted. So force-add it here rather than relying
+          # on a status check that ignored files can never satisfy.
+          #
+          # Named file, not the directory. `git add -f state/` force-adds
+          # whatever else has been dropped in there, and the whole point of an
+          # ignore rule is that force-adding past it should be aimed at one
+          # thing you meant.
+          if [ -f state/seen.json ]; then
+            # State is written with a plain write_text, so a scan killed at the
+            # timeout can leave a half-written file. Committing that is worse
+            # than committing nothing: the loader treats unparseable JSON as an
+            # empty state, so every role looks new again on the next run and
+            # the truncated file is then overwritten as though it were correct.
+            if ! python3 -c "import json;json.load(open('state/seen.json', encoding='utf-8'))" 2>/dev/null; then
+              echo "::error::state/seen.json is not valid JSON, so it was not committed. The scan was probably killed part-way through writing it."
+              exit 1
+            fi
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -f state/seen.json
+            if git diff --cached --quiet; then
+              echo "no state change"
+              exit 0
+            fi
+            git commit -m "state: $(date -u +%Y-%m-%d) scan"
+            # A scan takes minutes, and anything landing on main meanwhile
+            # makes this push a non-fast-forward. Rebase and retry rather than
+            # failing the run and losing the state we just computed.
+            #
+            # `pushed` tracks whether any attempt worked. Without it the loop
+            # ended on the third failure and the step exited 0 with the status
+            # of `sleep`, so three rejected pushes reported a green tick over a
+            # run whose state never left the runner.
+            pushed=
+            for i in 1 2 3; do
+              if git push; then pushed=yes; break; fi
+              echo "push rejected, rebasing (attempt $i)"
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || exit 1
+              sleep 3
+            done
+            if [ -z "$pushed" ]; then
+              echo "::error::state was committed locally but could not be pushed after 3 attempts. This run's scan history is lost."
+              exit 1
+            fi
+          else
+            echo "no state file was written"
+          fi
+
+      - name: Post new roles as an issue
+        if: steps.scan.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # roles.json only exists when `json` is one of the configured output
+          # formats. An html-only config used to reach this step and die on a
+          # FileNotFoundError traceback, which reads as a broken tool rather
+          # than as a setting.
+          if [ ! -f out/roles.json ]; then
+            echo "no out/roles.json, so there is nothing to post. Add 'json' to output.formats in your config if you want issues."
+            exit 0
+          fi
+          NEW=$(python3 -c "import json;print(len(json.load(open('out/roles.json', encoding='utf-8'))['new']))")
+          if [ "$NEW" -gt 0 ]; then
+            python3 - > body.md <<'PY'
+          import json
+          d = json.load(open("out/roles.json", encoding="utf-8"))
+          print(f"{len(d['new'])} new role(s) since the last run.\n")
+          for j in d["new"]:
+              # salary_label is computed from the figures. The raw string is
+              # often just the platform's heading ("Salary range", "Base Salary
+              # Range"), which tells the reader nothing.
+              pay = j["salary_label"]
+              loc = j["location"] or "location not stated"
+              print(f"- **[{j['title']}]({j['url']})**, {j['company']} · {loc} · {pay} · score {j['score']:.0f}")
+              for f in j["flags"]:
+                  print(f"  - {f}")
+          m = d["meta"]
+          print(f"\n<sub>{m['sources_ok']}/{m['sources_total']} sources responded.</sub>")
+          if m.get("throttled"):
+              print(f"\n<sub>{len(m['throttled'])} sources returned nothing but have "
+                    f"returned jobs before, so they may be rate limited rather than empty.</sub>")
+          PY
+            # A fork with Issues turned off answers `gh issue create` with a
+            # 410 and used to fail the whole run here, which also skipped the
+            # dashboard upload below. The roles are the output of the run, so
+            # put them somewhere that always works before deciding the step
+            # failed.
+            # Close the last one first. This runs on a schedule, so opening
+            # an issue per run and never closing one leaves a list that grows
+            # for ever and that nobody reads by the second week. The previous
+            # report is superseded by definition: the roles in it are already
+            # in the database, and this one lists what arrived since.
+            #
+            # `|| true` throughout, because a fork with Issues disabled must
+            # not fail the scan over its notifications, and the create below
+            # already handles that case.
+            gh issue list --state open --search 'in:title "New roles:"' \
+              --json number --jq '.[].number' 2>/dev/null | while read -r n; do
+                [ -n "$n" ] && gh issue close "$n" \
+                  --comment "Superseded by today's scan." >/dev/null 2>&1 || true
+            done || true
+            if ! gh issue create --title "New roles: $(date -u +%Y-%m-%d) ($NEW)" --body-file body.md; then
+              echo "::warning::could not open an issue. The roles are in the run summary and in the dashboard artifact."
+              {
+                echo "## New roles (the issue could not be opened)"
+                echo
+                cat body.md
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "nothing new"
+          fi
+
+      # Always kept, and private: workflow artifacts are only visible to people
+      # who can see the repo. This is the default way to get your dashboard.
+      #
+      # always(), because a run that broke somewhere is exactly the run whose
+      # partial output someone wants to look at.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard
+          path: out
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # OFF by default, same reasoning as PUBLISH_PAGES below: nothing extra
+      # happens to your data unless you deliberately turn it on.
+      #
+      #   gh variable set DRAFT_DOCS --body true
+      #   gh secret set GEMINI_API_KEY --body "your-key-from-aistudio.google.com"
+      #
+      # Drafts a CV and a cover letter, via Gemini directly (never the `claude`
+      # CLI -- see jobradar/gemini_generate.py), for the best-scoring new roles
+      # this run found. Gemini's free tier needs no billing account, so a call
+      # past the free quota fails with 429 rather than charging anything.
+      #
+      # DRAFT_MIN_SCORE (repo variable, default 70) and DRAFT_MAX_PER_RUN
+      # (default 10) bound how many roles get drafted in one run, so a big
+      # first scan does not spend the day's free quota on roles nobody has
+      # looked at yet. A role that fails to draft is logged and skipped: the
+      # scan and the issue above have already succeeded by this point, and
+      # losing those over a drafting hiccup would be the worse trade.
+      - name: Draft CV + cover letter for the best new roles
+        if: vars.DRAFT_DOCS == 'true' && steps.scan.outcome == 'success'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DRAFT_MIN_SCORE: ${{ vars.DRAFT_MIN_SCORE }}
+          DRAFT_MAX_PER_RUN: ${{ vars.DRAFT_MAX_PER_RUN }}
+        run: |
+          pip install google-genai
+          python3 scripts/draft_new_roles.py
+
+      - uses: actions/upload-artifact@v4
+        if: vars.DRAFT_DOCS == 'true'
+        with:
+          name: applications
+          path: applications
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Replaces the plain static dashboard with the public one (web/) when
+      # Pages is on: role list + filters (same as the plain one), plus
+      # client-side sponsor/CV-fit scoring and CV/cover-letter drafting
+      # that run entirely in each VISITOR's own browser -- their CV, their
+      # Gemini key, their applied/skipped choices never leave it, and
+      # never touch this repo or this workflow. See web/README.md.
+      #
+      # registers.json is exported here, server-side, because the
+      # dashboard runs with no backend and a browser fetch straight to
+      # gov.uk from a github.io page would need CORS gov.uk doesn't grant.
+      # Exporting it is just publishing data `job-radar scan` already
+      # fetched and cached a few steps up, not a second live fetch.
+      - name: Build the public dashboard
+        if: vars.PUBLISH_PAGES == 'true' && steps.scan.outcome == 'success'
+        run: |
+          python3 scripts/export_register.py
+          cp web/dashboard.html out/index.html
+          cp web/app.js out/app.js
+          cp -r web/lib out/lib
+          mkdir -p out/skills/rate-cv/references
+          cp skills/rate-cv/SKILL.md out/skills/rate-cv/ 2>/dev/null || true
+          cp skills/rate-cv/references/rubric.md out/skills/rate-cv/references/ 2>/dev/null || true
+          cp skills/rate-cv/references/craft.md out/skills/rate-cv/references/ 2>/dev/null || true
+
+      # Only built when you have opted in to publishing (see below).
+      - uses: actions/upload-pages-artifact@v3
+        if: vars.PUBLISH_PAGES == 'true' && steps.scan.outcome == 'success'
+        with:
+          path: out
+
+      - name: Report a failed run
+        # Nobody watches the Actions tab. A scheduled run that goes red there
+        # is a red mark on a page that is not opened, so the scan can stop
+        # working for weeks while looking exactly like a quiet job market.
+        # An issue reaches the person who owns the fork.
+        #
+        # continue-on-error, so that a repo with Issues disabled does not turn
+        # one failure into two. The job is already failed by whatever failed;
+        # this step only reports it.
+        if: failure()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Same rule as the roles report: one open failure notice, not one
+          # per failed run. A scan that fails every night for a week is one
+          # problem, and seven identical issues make it look like seven.
+          gh issue list --state open --search 'in:title "Scan failed:"' \
+            --json number --jq '.[].number' 2>/dev/null | while read -r n; do
+              [ -n "$n" ] && gh issue close "$n" \
+                --comment "Superseded by a later run." >/dev/null 2>&1 || true
+          done || true
+          gh issue create \
+            --title "Scan failed: run ${{ github.run_id }}" \
+            --body "The scheduled scan did not finish. Nothing was scanned, or it stopped part-way, so no new roles were reported today.
+
+          Log: ${RUN_URL}
+
+          The usual causes, in the order they happen:
+
+          1. No \`config.yaml\` in the repo. It is gitignored, so a fork has to \`git add -f config.yaml\` once.
+          2. The scan ran past its 300 minute step limit. The bundled list is 17,807 boards and apply.workable.com alone is a 50 minute floor.
+          3. The state commit could not be pushed after three tries.
+
+          This issue is filed once per failed run and is safe to close." \
+            || echo "could not file an issue"
+
+  publish:
+    # OFF by default, and deliberately so.
+    #
+    # A GitHub Pages site is served to anyone who knows the URL. There is no
+    # login on it, and making the repository private does not change that:
+    # private-repo Pages needs a paid plan, and even then the site itself is
+    # still public unless you are on Enterprise with access control.
+    #
+    # So publishing means putting the roles you are looking at, and the
+    # filters that produced them, on the open web. Some people want exactly
+    # that. Nobody should get it by accident.
+    #
+    # To turn it on:
+    #   gh variable set PUBLISH_PAGES --body true
+    #   then Settings > Pages > Source: GitHub Actions
+    if: vars.PUBLISH_PAGES == 'true'
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
