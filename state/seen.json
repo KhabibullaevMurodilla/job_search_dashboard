@@ -1,0 +1,24 @@
+{
+ "runs": 6,
+ "seen": {
+  "7845982a21d35ed2": {
+   "company": "C0",
+   "first_seen": "2026-10-04",
+   "last_seen": "2026-10-04",
+   "title": "Engineering Manager"
+  },
+  "8b3ca26ec3bc66e0": {
+   "company": "C1",
+   "first_seen": "2026-10-04",
+   "last_seen": "2026-10-04",
+   "title": "Engineering Manager"
+  }
+ },
+ "source_counts": {
+  "https://a.invalid/x": 0,
+  "https://b.invalid/x": 0,
+  "https://c0.invalid/x": 1,
+  "https://c1.invalid/x": 1
+ },
+ "updated": "2026-10-04"
+}
