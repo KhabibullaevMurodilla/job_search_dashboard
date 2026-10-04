@@ -51,8 +51,7 @@
     evalCache: new Map(),   // uid -> evaluateJob() result, recomputed when CV changes
     filters: { search: "", minScore: 0, workMode: "any", country: "any", status: "all" },
     sortBy: "score",
-    rateCvSkillText: null,  // fetched once, lazily, only when a CV draft is requested
-  };
+      };
 
   // --------------------------------------------------------------- data
   async function loadData() {
@@ -116,49 +115,14 @@
     return DC.stripCodeFence(DC.extractGeminiText(json));
   }
 
-  async function getRateCvSkillText() {
-    if (state.rateCvSkillText !== null) return state.rateCvSkillText;
-    try {
-      const [skillRes, rubricRes, craftRes] = await Promise.all([
-        fetch("./skills/rate-cv/SKILL.md"),
-        fetch("./skills/rate-cv/references/rubric.md"),
-        fetch("./skills/rate-cv/references/craft.md"),
-      ]);
-      const parts = [];
-      for (const [label, res] of [["SKILL.md", skillRes],
-        ["references/rubric.md", rubricRes],
-        ["references/craft.md", craftRes]]) {
-        if (res && res.ok) parts.push(`--- rate-cv/${label} ---\n${await res.text()}`);
-      }
-      state.rateCvSkillText = parts.join("\n\n");
-    } catch (e) {
-      state.rateCvSkillText = "";
-    }
-    return state.rateCvSkillText;
-  }
-
-  async function draftCv(role) {
-    if (!state.cvText.trim()) {
-      throw new Error("Paste your CV first, in the box above the role list.");
-    }
-    const skillText = await getRateCvSkillText();
-    const prompt = DC.buildCvPrompt(role, state.cvText, skillText);
-    const draft = await callGemini(prompt);
-    const q = DC.qualityCheckCv(draft, 400, 950);
-    state.drafts[role.uid] = Object.assign({}, state.drafts[role.uid], { cv: draft });
-    lsSet(LS.drafts, state.drafts);
-    return { draft, quality: q };
-  }
-
   async function draftCoverLetter(role) {
-    const existing = state.drafts[role.uid] && state.drafts[role.uid].cv;
-    if (!existing) {
-      throw new Error("Draft the CV for this role first -- the letter is "
-        + "checked against it so the two don't repeat each other.");
+    if (!state.cvText.trim()) {
+      throw new Error("Upload or paste your CV first (left panel). The letter "
+        + "is written from it and checked so it does not repeat it.");
     }
-    const prompt = DC.buildCoverLetterPrompt(role, existing, state.cvText);
+    const prompt = DC.buildCoverLetterPrompt(role, state.cvText);
     const draft = await callGemini(prompt);
-    const q = DC.qualityCheckCoverLetter(draft, existing);
+    const q = DC.qualityCheckCoverLetter(draft, state.cvText);
     state.drafts[role.uid] = Object.assign({}, state.drafts[role.uid], { coverLetter: draft });
     lsSet(LS.drafts, state.drafts);
     return { draft, quality: q };
@@ -213,7 +177,6 @@
 
     const actions = el("div", { class: "role-actions" });
     actions.appendChild(el("a", { href: role.url || "#", target: "_blank", rel: "noopener", class: "btn", text: "Open posting" }));
-    actions.appendChild(el("button", { class: "btn", onclick: () => openDraftModal(role, "cv"), text: "Draft CV" }));
     actions.appendChild(el("button", { class: "btn", onclick: () => openDraftModal(role, "cover_letter"), text: "Draft cover letter" }));
     actions.appendChild(el("button", {
       class: `btn ${status === "applied" ? "btn-active" : ""}`,
@@ -266,13 +229,13 @@
   function openDraftModal(role, kind) {
     const modal = document.getElementById("modal");
     const body = document.getElementById("modal-body");
-    const title = kind === "cv" ? `CV draft — ${role.title}` : `Cover letter draft — ${role.title}`;
+    const title = `Cover letter draft — ${role.title}`;
     document.getElementById("modal-title").textContent = title;
     body.innerHTML = "";
     body.appendChild(el("div", { class: "modal-status", text: "Drafting with Gemini… this calls the API directly from your browser with your own key." }));
     modal.classList.add("open");
 
-    const run = kind === "cv" ? draftCv(role) : draftCoverLetter(role);
+    const run = draftCoverLetter(role);
     run.then(({ draft, quality }) => {
       body.innerHTML = "";
       if (!quality.ok) {
