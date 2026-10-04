@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Radar — case file</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  /*
+    DESIGN — "Case File"
+    This page triages job postings the way a caseworker triages a stack of
+    paper files: one typed line per fact, a stamped number for the score,
+    coloured ink only where a verdict has actually been reached (sponsor
+    confirmed, fit high or low). Courier Prime throughout is not a data-label
+    accent, it is the whole voice of the page -- these are typed forms, so
+    everything reads as typed. No rounded cards, no gradients, no icons
+    standing in for words.
+  */
+  :root {
+    --paper:   #EAE3D2;
+    --paper-2: #E2DABD;
+    --carbon:  #2B2B26;
+    --rule:    #C6BC9F;
+    --muted:   #85805E;
+    --approved:#3C6E4A;
+    --caution: #8A5A14;
+    --denied:  #8B3A2B;
+    --focus:   #2A5A8C;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--paper); color: var(--carbon);
+    font-family: "Courier Prime", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px; line-height: 1.55;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  header {
+    padding: 22px 28px 18px; border-bottom: 3px double var(--carbon);
+    display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+    background: var(--paper);
+  }
+  header h1 {
+    font-size: 19px; margin: 0; font-weight: 700; letter-spacing: .01em;
+  }
+  header .sub { color: var(--muted); font-size: 12.5px; max-width: 56ch; }
+
+  .layout { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 76px); }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+
+  aside {
+    border-right: 1px solid var(--rule); padding: 18px 20px; overflow-y: auto;
+    background: var(--paper-2);
+  }
+  @media (max-width: 860px) { aside { border-right: none; border-bottom: 1px solid var(--rule); } }
+
+  .panel { padding: 0 0 18px; margin-bottom: 18px; border-bottom: 1px solid var(--rule); }
+  .panel:last-child { border-bottom: none; }
+  .panel h2 {
+    font-size: 13px; margin: 0 0 10px; font-weight: 700;
+  }
+  .panel h2::before { content: "— "; color: var(--muted); }
+
+  textarea, input[type=text], input[type=password], select {
+    width: 100%; background: var(--paper); border: 1px solid var(--carbon); color: var(--carbon);
+    padding: 7px 9px; font-size: 13px; font-family: inherit; border-radius: 0;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  label { font-size: 12px; color: var(--muted); display: block; margin: 10px 0 4px; }
+  .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+  .btn {
+    background: var(--paper); color: var(--carbon); border: 1px solid var(--carbon);
+    border-radius: 0; padding: 6px 12px; font-size: 12.5px; font-family: inherit;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: background .1s, color .1s;
+  }
+  .btn:hover { background: var(--carbon); color: var(--paper); }
+  .btn-active { background: var(--carbon); color: var(--paper); }
+  .note { font-size: 11.5px; color: var(--muted); margin-top: 7px; line-height: 1.5; }
+
+  main { padding: 20px 28px 40px; overflow-y: auto; }
+  #role-count { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+
+  /* -- ledger rows, not cards -- */
+  #role-list { border-top: 1px solid var(--rule); }
+  .role-card {
+    display: grid; grid-template-columns: 56px 1fr; gap: 16px;
+    padding: 14px 0; border-bottom: 1px solid var(--rule);
+  }
+  .role-card.status-skipped { opacity: .4; }
+  .role-card.status-applied .role-title::after { content: " (applied)"; color: var(--approved); font-weight: 400; }
+
+  .role-stamp {
+    width: 56px; height: 56px; border: 2px solid var(--carbon); border-radius: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px; transform: rotate(-3deg);
+    align-self: start;
+  }
+  .role-card:nth-child(odd) .role-stamp { transform: rotate(2deg); }
+
+  .role-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .role-title { font-weight: 700; font-size: 15px; }
+  .role-score { display: none; } /* score now lives in .role-stamp */
+  .role-sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+
+  .role-chips { display: flex; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
+  .chip {
+    font-size: 11.5px; padding: 2px 8px; border: 1px solid currentColor; border-radius: 0;
+    color: var(--muted);
+  }
+  .chip.sc-good { color: var(--approved); }
+  .chip.sc-mid  { color: var(--caution); }
+  .chip.sc-low  { color: var(--denied); }
+
+  .role-reason { font-size: 12px; color: var(--muted); margin-top: 8px; font-style: italic; }
+  .role-actions { display: flex; gap: 8px; margin-top: 11px; flex-wrap: wrap; }
+
+  .empty, .fatal { color: var(--muted); padding: 50px 0; text-align: center; }
+  .fatal { color: var(--denied); }
+
+  /* -- case file pulled from the drawer, not a centred modal -- */
+  #modal {
+    display: none; position: fixed; inset: 0 0 0 auto; width: min(560px, 100%);
+    background: var(--paper); border-left: 3px double var(--carbon);
+    box-shadow: -8px 0 24px rgba(0,0,0,.18);
+  }
+  #modal.open { display: flex; flex-direction: column; }
+  .modal-box { display: flex; flex-direction: column; height: 100%; }
+  .modal-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px; border-bottom: 1px solid var(--rule); flex-shrink: 0;
+  }
+  #modal-title { font-weight: 700; font-size: 14px; }
+  #modal-body { padding: 18px 20px; overflow-y: auto; }
+  .draft-text { white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.65; }
+  .quality-warn {
+    border: 1px solid var(--caution); color: var(--caution);
+    padding: 10px 12px; margin-bottom: 16px; font-size: 13px;
+  }
+  .quality-warn ul { margin: 6px 0 0; padding-left: 18px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .modal-status { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Job Radar — case file</h1>
+  <span class="sub">Scanning runs on a schedule, server-side. Everything below — your CV, your Gemini key, which roles you've marked — is typed into this page and stays in this browser only.</span>
+</header>
+<div class="layout">
+  <aside>
+    <div class="panel">
+      <h2>CV on file</h2>
+      <textarea id="cv-text" placeholder="Paste your CV as plain text, or attach a file below."></textarea>
+      <input type="file" id="cv-file" accept=".txt,.md,.pdf" style="margin-top:8px;">
+      <div class="row">
+        <button class="btn" id="cv-save">Save</button>
+        <button class="btn" id="cv-clear">Clear</button>
+      </div>
+      <div class="note">Stored only in this browser. Used to score how each role fits, and as the source for drafted CVs and cover letters. Never sent anywhere until you ask for a draft.</div>
+    </div>
+    <div class="panel">
+      <h2>Gemini key</h2>
+      <input type="password" id="gemini-key" placeholder="paste your key">
+      <div class="row"><button class="btn" id="gemini-key-save">Save</button></div>
+      <div class="note">Free, no billing account needed — get one at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Kept in this browser and sent straight to Google only when you ask for a draft.</div>
+    </div>
+    <div class="panel">
+      <h2>Filters</h2>
+      <label for="search">Search</label>
+      <input type="text" id="search" placeholder="title, company, location">
+      <label for="min-score">Minimum score: <span id="min-score-label">0</span></label>
+      <input type="range" id="min-score" min="0" max="100" value="0">
+      <label for="status-filter">Status</label>
+      <select id="status-filter">
+        <option value="all">All</option>
+        <option value="new">New</option>
+        <option value="applied">Applied</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <label for="sort-by">Sort by</label>
+      <select id="sort-by">
+        <option value="score">Score</option>
+        <option value="date">Date posted</option>
+      </select>
+    </div>
+  </aside>
+  <main>
+    <div id="role-count"></div>
+    <div id="role-list"></div>
+  </main>
+</div>
+
+<div id="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <strong id="modal-title"></strong>
+      <button class="btn" id="modal-close">Close</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="app"></div>
+
+<script src="./lib/pdf.min.js"></script>
+<script src="./lib/scoring.js"></script>
+<script src="./lib/dashboard-core.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
