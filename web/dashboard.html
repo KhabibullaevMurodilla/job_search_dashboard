@@ -146,6 +146,65 @@
   .quality-warn ul { margin: 6px 0 0; padding-left: 18px; }
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
   .modal-status { color: var(--muted); }
+
+  /* -- tabs -- */
+  #tabs { display: flex; gap: 0; border-bottom: 1px solid var(--rule); padding: 0 28px; background: var(--paper); }
+  #tabs button {
+    font: inherit; font-size: 13.5px; padding: 10px 18px; cursor: pointer; color: var(--muted);
+    background: none; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; border-radius: 0;
+  }
+  #tabs button[aria-selected="true"] { color: var(--carbon); font-weight: 700; background: var(--paper-2); border-color: var(--rule); }
+  [hidden] { display: none !important; }
+
+  /* -- score a posting -- */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; max-width: 760px; }
+  .form-grid .wide { grid-column: 1 / -1; }
+  #ps-desc { min-height: 220px; }
+  .result { margin-top: 22px; padding-top: 18px; border-top: 3px double var(--carbon); max-width: 760px; }
+  .result .role-card { border-bottom: none; padding-top: 0; }
+  .verdict { font-weight: 700; margin: 4px 0 2px; }
+  .detail-list { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+
+  /* -- applications -- */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; }
+  .toolbar input[type=text], .toolbar select { width: auto; min-width: 160px; }
+  .charts { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 28px; margin-bottom: 26px; }
+  @media (max-width: 860px) { .charts { grid-template-columns: 1fr; } }
+  .chart h3 { font-size: 13px; margin: 0 0 10px; }
+  .funnel-row { display: grid; grid-template-columns: 86px 1fr 28px; gap: 8px; align-items: center; margin-bottom: 5px; font-size: 12.5px; }
+  .funnel-track { height: 10px; }
+  .funnel-bar { height: 10px; background: var(--carbon); }
+  .funnel-bar.offer { background: var(--approved); }
+  .funnel-bar.rejected { background: var(--denied); }
+  .funnel-count { text-align: right; }
+  .weekly { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; align-items: end; height: 120px; border-bottom: 1px solid var(--carbon); }
+  .week-col { display: flex; gap: 2px; align-items: flex-end; height: 100%; justify-content: center; }
+  .week-bar { width: 10px; min-height: 0; }
+  .week-bar.applied { background: var(--carbon); }
+  .week-bar.saved { border: 1px solid var(--carbon); background: repeating-linear-gradient(45deg, var(--carbon) 0 1px, transparent 1px 4px); }
+  .week-labels { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; margin-bottom: 8px; }
+  .swatch { display: inline-block; width: 12px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+  .swatch.applied { background: var(--carbon); }
+  .swatch.saved { border: 1px solid var(--carbon); background: repeating-linear-gradient(45deg, var(--carbon) 0 1px, transparent 1px 4px); }
+  table.plain { border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  table.plain th, table.plain td { border-bottom: 1px solid var(--rule); padding: 3px 12px 3px 0; text-align: left; font-weight: 400; }
+  table.plain th { color: var(--muted); }
+  .insights { margin-top: 14px; font-size: 12.5px; }
+  .insights p { margin: 3px 0; }
+  details.app { border-bottom: 1px solid var(--rule); padding: 10px 0; }
+  details.app > summary { cursor: pointer; list-style: none; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: baseline; }
+  details.app > summary::-webkit-details-marker { display: none; }
+  .app-title { font-weight: 700; }
+  .app-meta { color: var(--muted); font-size: 12.5px; }
+  .app-body { padding: 12px 0 4px; display: grid; gap: 14px; }
+  .app-body h4 { margin: 0 0 4px; font-size: 13px; }
+  .app-body textarea { min-height: 90px; }
+  .doc-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 3px 0; font-size: 12.5px; }
+  .pill { font-size: 11.5px; border: 1px solid currentColor; padding: 1px 7px; color: var(--muted); }
+  .pill.st-offer { color: var(--approved); } .pill.st-rejected { color: var(--denied); }
+  .pill.st-interview, .pill.st-applied { color: var(--carbon); }
+  .small { font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -153,6 +212,11 @@
   <h1>Job Radar — case file</h1>
   <span class="sub">Scanning runs on a schedule, server-side. Everything below — your CV, your Gemini key, which roles you've marked — is typed into this page and stays in this browser only.</span>
 </header>
+<div id="tabs" role="tablist">
+  <button role="tab" id="tab-roles" data-tab="roles" aria-selected="true">Scanned roles</button>
+  <button role="tab" id="tab-score" data-tab="score" aria-selected="false">Score a posting</button>
+  <button role="tab" id="tab-apps" data-tab="apps" aria-selected="false">My applications</button>
+</div>
 <div class="layout">
   <aside>
     <div class="panel">
@@ -171,7 +235,7 @@
       <div class="row"><button class="btn" id="gemini-key-save">Save</button></div>
       <div class="note">Free, no billing account needed — get one at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Kept in this browser and sent straight to Google only when you ask for a draft.</div>
     </div>
-    <div class="panel">
+    <div class="panel" id="panel-filters">
       <h2>Filters</h2>
       <label for="search">Search</label>
       <input type="text" id="search" placeholder="title, company, location">
@@ -193,8 +257,49 @@
     </div>
   </aside>
   <main>
-    <div id="role-count"></div>
-    <div id="role-list"></div>
+    <section id="view-roles" role="tabpanel" aria-labelledby="tab-roles">
+      <div id="role-count"></div>
+      <div id="role-list"></div>
+    </section>
+
+    <section id="view-score" role="tabpanel" aria-labelledby="tab-score" hidden>
+      <p class="small" style="max-width:62ch">Paste any job description, from any site, and see the same sponsor and CV-fit scoring the scanned roles get. Nothing is sent anywhere until you ask for a cover letter.</p>
+      <div class="form-grid">
+        <div><label for="ps-title">Job title</label><input type="text" id="ps-title"></div>
+        <div><label for="ps-company">Company</label><input type="text" id="ps-company"></div>
+        <div><label for="ps-location">Location</label><input type="text" id="ps-location" placeholder="e.g. Cambridge, UK"></div>
+        <div><label for="ps-url">Link to the posting (optional)</label><input type="text" id="ps-url"></div>
+        <div class="wide"><label for="ps-desc">Job description</label><textarea id="ps-desc" placeholder="Paste the full posting text here."></textarea></div>
+      </div>
+      <div class="row">
+        <button class="btn" id="ps-score">Score this posting</button>
+        <button class="btn" id="ps-clear">Clear</button>
+      </div>
+      <div id="ps-result" class="result" hidden></div>
+    </section>
+
+    <section id="view-apps" role="tabpanel" aria-labelledby="tab-apps" hidden>
+      <div class="toolbar">
+        <input type="text" id="ap-search" placeholder="search saved roles" aria-label="Search applications">
+        <select id="ap-filter" aria-label="Filter by status">
+          <option value="all">All statuses</option>
+          <option value="saved">Saved</option>
+          <option value="applied">Applied</option>
+          <option value="interview">Interview</option>
+          <option value="offer">Offer</option>
+          <option value="rejected">Rejected</option>
+          <option value="withdrawn">Withdrawn</option>
+        </select>
+        <button class="btn" id="ap-zip">Download everything (.zip)</button>
+        <button class="btn" id="ap-folder" hidden>Save to a folder</button>
+        <button class="btn" id="ap-export">Export backup (.json)</button>
+        <label class="btn" for="ap-import" style="margin:0;cursor:pointer">Import backup</label>
+        <input type="file" id="ap-import" accept=".json" hidden>
+      </div>
+      <div id="ap-message" class="small" role="status"></div>
+      <div id="ap-dashboard"></div>
+      <div id="ap-list"></div>
+    </section>
   </main>
 </div>
 
@@ -213,6 +318,8 @@
 <script src="./lib/pdf.min.js"></script>
 <script src="./lib/scoring.js"></script>
 <script src="./lib/dashboard-core.js"></script>
+<script src="./lib/applications.js"></script>
+<script src="./lib/zip.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
