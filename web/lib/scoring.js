@@ -529,7 +529,7 @@
       worthApplying = blended !== null ? Math.min(blended, 30) : 30;
     } else if (legPercent === null && cv.percent === null) {
       recVerdict = "Not enough information yet";
-      recExplanation = "Add your CV in the extension's options to get a real recommendation here.";
+      recExplanation = "Add your CV in the left panel to get a real recommendation here.";
       worthApplying = null;
     } else {
       const legTier = legPercent === null ? "unknown" : legPercent >= 70 ? "high" : legPercent >= 40 ? "medium" : "low";
