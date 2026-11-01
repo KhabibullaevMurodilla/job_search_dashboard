@@ -28,6 +28,7 @@
     geminiKey: "jr_gemini_key",
     status: "jr_role_status",     // {uid: "applied"|"skipped"}
     apps: "jr_applications",      // [application records, see lib/applications.js]
+    myName: "jr_my_name",         // string, used to sign emails and statements
     phd: "jr_phd",                // [PhD application records, see lib/phd.js]
   };
 
@@ -768,37 +769,189 @@
     root.appendChild(ins);
   }
 
-  // Run one Gemini job for a record, with the button showing it is working.
+  const TASK_TEXT = {
+    email: ["Draft supervisor email", "Redraft", "Drafting the supervisor email…"],
+    review: ["Review against this programme", "Review again", "Reviewing the proposal…"],
+    statement: ["Draft personal statement", "Redraft", "Drafting the personal statement…"],
+    tailor: ["Tailor my proposal to this programme", "Tailor again", "Tailoring the proposal…"],
+  };
+  const myName = () => (lsGet(LS.myName, "") || "").trim();
+
+  // One Gemini job for a record. Returns a plain-language note, or throws
+  // with the reason it could not run (no CV, no key, nothing to work from).
+  async function phdTask(p, kind) {
+    if (!state.cvText.trim()) throw new Error("Upload or paste your CV first (left panel). Everything here is written against it.");
+    if ((kind === "review" || kind === "tailor") && !(p.proposal || "").trim()) throw new Error("Paste your research proposal into this programme first.");
+    if (kind === "email" && !(p.theme || p.supervisor || p.programme)) throw new Error("Add the theme or supervisor first.");
+    const prompt = {
+      email: () => PH.buildSupervisorEmailPrompt(p, state.cvText),
+      review: () => PH.buildProposalReviewPrompt(p, state.cvText),
+      statement: () => PH.buildStatementPrompt(p, state.cvText, myName()),
+      tailor: () => PH.buildTailorProposalPrompt(p, state.cvText),
+    }[kind]();
+    const text = await callGemini(prompt);
+    let note;
+    if (kind === "email") {
+      p.supervisorDraft = text;
+      const q = PH.qualityCheckEmail(text, p);
+      note = q.ok ? `Supervisor email drafted (${q.words} words).` : "Supervisor email drafted, but check: " + q.problems.join(" ");
+    } else if (kind === "statement") {
+      p.statement = text;
+      const q = PH.qualityCheckStatement(text, state.cvText, DC.sharedNgram);
+      note = q.ok ? `Personal statement drafted (${q.words} words).` : "Personal statement drafted, but check: " + q.problems.join(" ");
+    } else if (kind === "tailor") {
+      p.tailoredProposal = text;
+      note = /^\s*NOTE:/i.test(text) ? "Proposal tailored. Read the NOTE on the first line: it says what does not fit this programme." : "Proposal tailored. Your original is untouched.";
+    } else {
+      p.proposalReview = text;
+      note = "Proposal review saved.";
+    }
+    p.updatedAt = new Date().toISOString();
+    savePhd();
+    return note;
+  }
+
   async function phdGenerate(p, kind) {
     const key = p.id + ":" + kind;
+    if (state.busy.has(key) || state.busy.has(p.id + ":all")) return;
+    state.busy.add(key);
+    setPhMessage(TASK_TEXT[kind][2]);
+    renderPhd();
+    try { setPhMessage(await phdTask(p, kind)); }
+    catch (e) { setPhMessage(e.message || String(e)); }
+    finally { state.busy.delete(key); state.openPhd.add(p.id); renderPhd(); }
+  }
+
+  // Everything that can be drafted, in order. A missing CV or key stops the
+  // run at once; a step that has nothing to work from (no proposal) is skipped.
+  async function phdPrepareAll(p) {
+    const key = p.id + ":all";
     if (state.busy.has(key)) return;
     state.busy.add(key);
-    setPhMessage(kind === "email" ? "Drafting the supervisor email with Gemini…" : "Reviewing the proposal with Gemini…");
+    const done = [], skipped = [];
     renderPhd();
     try {
-      if (!state.cvText.trim()) throw new Error("Upload or paste your CV first (left panel). Both are written against it.");
-      if (kind === "review" && !(p.proposal || "").trim()) throw new Error("Paste your research proposal into this programme first.");
-      if (kind === "email" && !(p.theme || p.supervisor || p.programme)) throw new Error("Add the theme or supervisor first.");
-      const text = await callGemini(kind === "email"
-        ? PH.buildSupervisorEmailPrompt(p, state.cvText)
-        : PH.buildProposalReviewPrompt(p, state.cvText));
-      if (kind === "email") {
-        p.supervisorDraft = text;
-        const q = PH.qualityCheckEmail(text, p);
-        setPhMessage(q.ok ? `Email drafted (${q.words} words) and saved here.` : "Email drafted and saved, but check: " + q.problems.join(" "));
-      } else {
-        p.proposalReview = text;
-        setPhMessage("Review saved under the proposal.");
+      for (const kind of ["statement", "tailor", "email", "review"]) {
+        if ((kind === "tailor" || kind === "review") && !(p.proposal || "").trim()) { skipped.push(kind === "tailor" ? "tailored proposal" : "proposal review"); continue; }
+        setPhMessage(`Preparing everything: ${TASK_TEXT[kind][2].replace("…", "")} (${done.length + skipped.length + 1} of 4)…`);
+        try { await phdTask(p, kind); done.push(kind); }
+        catch (e) {
+          if (/CV first|Gemini API key|API key|quota|HTTP/i.test(e.message || "")) { setPhMessage((done.length ? `Stopped after ${done.length} of 4: ` : "") + (e.message || String(e))); return; }
+          skipped.push(kind);
+        }
       }
-      p.updatedAt = new Date().toISOString();
-      savePhd();
-    } catch (e) {
-      setPhMessage(e.message || String(e));
-    } finally {
-      state.busy.delete(key);
-      state.openPhd.add(p.id);
-      renderPhd();
+      const names = { statement: "personal statement", tailor: "tailored proposal", email: "supervisor email", review: "proposal review" };
+      setPhMessage("Prepared: " + (done.map((k) => names[k]).join(", ") || "nothing")
+        + (skipped.length ? `. Not done: ${skipped.join(", ")}${(p.proposal || "").trim() ? "" : " (paste your research proposal to get these)"}` : "")
+        + ". Read each draft and edit it before you use it.");
+    } finally { state.busy.delete(key); state.openPhd.add(p.id); renderPhd(); }
+  }
+
+  function genButton(p, kind) {
+    const busy = state.busy.has(p.id + ":" + kind) || state.busy.has(p.id + ":all");
+    const has = { email: p.supervisorDraft, review: p.proposalReview, statement: p.statement, tailor: p.tailoredProposal }[kind];
+    const b = el("button", { class: "btn", text: busy ? "Working…" : TASK_TEXT[kind][has ? 1 : 0], onclick: () => phdGenerate(p, kind) });
+    if (busy) b.setAttribute("disabled", "");
+    return b;
+  }
+
+  function textBlock(p, label, field, extra) {
+    const wrap = el("div", {}, [el("h4", { text: label })]);
+    if (p[field]) {
+      const ta = el("textarea", { "aria-label": label, style: "min-height:180px" });
+      ta.value = p[field];
+      ta.addEventListener("change", () => { p[field] = ta.value; p.updatedAt = new Date().toISOString(); savePhd(); });
+      wrap.appendChild(ta);
     }
+    const row = el("div", { class: "row" }, [genButton(p, extra)]);
+    if (p[field]) row.appendChild(el("button", { class: "btn", text: "Copy", onclick: () => copyText(p[field]) }));
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  function downloadOne(p) {
+    const files = PH.folderPlan(p).files;
+    downloadBlob(new Blob([self.Zip.build(files)], { type: "application/zip" }), `phd-${PH.slug(p.university)}-${PH.slug(p.programme)}.zip`);
+    setPhMessage(`Downloaded ${files.length} files for ${p.programme} at ${p.university}.`);
+  }
+
+  // ---- start from an advert
+  function cvMatchFor(advert) {
+    if (!state.cvText.trim()) return { percent: null, matched: [], missing: [], total: 0, noCv: true };
+    return PH.cvTermMatch(advert, state.cvText);
+  }
+
+  async function readAdvert() {
+    const text = document.getElementById("ph-advert-text").value;
+    const out = document.getElementById("ph-advert-result");
+    out.hidden = false; out.innerHTML = "";
+    if (text.trim().length < 120) { out.appendChild(el("p", { text: "Paste the whole advert first. That is too short to read." })); return; }
+    const checks = PH.advertChecks(text);
+    let fit = cvMatchFor(text);
+    let found = null, foundNote = "";
+    if (lsGet(LS.geminiKey, "")) {
+      out.appendChild(el("p", { class: "small", text: "Reading the advert with Gemini…" }));
+      try { found = PH.parseAdvertExtract(await callGemini(PH.buildAdvertExtractPrompt(text))); }
+      catch (e) { foundNote = e.message || String(e); }
+      out.innerHTML = "";
+    } else {
+      foundNote = "Add your Gemini key (left panel) and I will read out the details for you. For now, fill them in below.";
+    }
+    const f = found || { university: "", programme: "", theme: "", supervisor: "", funding: "unknown", deadline: "", requirements: [] };
+
+    if (fit.noCv) {
+      out.appendChild(el("h4", { text: "CV match: not scored", style: "margin:0 0 4px" }));
+      out.appendChild(el("p", { class: "small", text: "Save your CV in the left panel to see which of this advert's main terms it mentions." }));
+    } else if (fit.percent == null) {
+      out.appendChild(el("h4", { text: "CV match: not enough text", style: "margin:0 0 4px" }));
+      out.appendChild(el("p", { class: "small", text: "The advert has too few distinctive terms to compare." }));
+    } else {
+      out.appendChild(el("h4", { text: `Your CV mentions ${fit.matched.length} of the advert's ${fit.total} main terms (${fit.percent}%)`, style: "margin:0 0 4px" }));
+      out.appendChild(el("p", { class: "small", text: "Found in your CV: " + (fit.matched.join(", ") || "none") }));
+      out.appendChild(el("p", { class: "small", text: "Not in your CV: " + (fit.missing.join(", ") || "none") + ". This is word overlap, not a judgement of your chances: a term can be missing only because you word it differently." }));
+    }
+    out.appendChild(el("h4", { text: "What the advert says", style: "margin:12px 0 2px" }));
+    const ul = el("ul", { class: "found-list" });
+    for (const i of checks.items) ul.appendChild(el("li", { text: (i.found ? "Yes: " : "Not found: ") + i.label }));
+    out.appendChild(ul);
+    if (checks.warnings.length) out.appendChild(el("ul", { class: "warn-list" }, checks.warnings.map((w) => el("li", { text: w }))));
+    if (f.requirements.length) {
+      out.appendChild(el("h4", { text: "What it asks of you", style: "margin:12px 0 2px" }));
+      out.appendChild(el("ul", { class: "found-list" }, f.requirements.map((r) => el("li", { text: r }))));
+    }
+    if (foundNote) out.appendChild(el("p", { class: "small", text: foundNote }));
+
+    const inputs = {};
+    const grid = el("div", { class: "form-grid" });
+    const add = (key, label, type, wide) => {
+      const input = el("input", { type: type || "text", "aria-label": label });
+      input.value = f[key] || "";
+      inputs[key] = input;
+      grid.appendChild(el("div", { class: wide ? "wide" : "" }, [el("label", { text: label }), input]));
+    };
+    add("university", "University"); add("programme", "Programme"); add("theme", "Research theme", "text", true);
+    add("supervisor", "Supervisor"); add("deadline", "Deadline", "date");
+    const fund = el("select", { "aria-label": "Funding" });
+    for (const x of PH.FUNDING) fund.appendChild(el("option", { value: x, text: x }));
+    fund.value = f.funding; inputs.funding = fund;
+    grid.appendChild(el("div", {}, [el("label", { text: "Funding" }), fund]));
+    out.appendChild(el("h4", { text: "Check these, then add it", style: "margin:12px 0 2px" }));
+    out.appendChild(grid);
+    out.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "ph-advert-add", text: "Add as a programme", onclick: () => {
+      if (!inputs.university.value.trim()) { setPhMessage("Add the university's name first."); return; }
+      const p = PH.newPhd({
+        university: inputs.university.value, programme: inputs.programme.value, theme: inputs.theme.value,
+        supervisor: inputs.supervisor.value, funding: inputs.funding.value, deadline: inputs.deadline.value,
+        advert: text, requirements: f.requirements,
+      });
+      state.phd.push(p);
+      if (savePhd()) {
+        state.openPhd.add(p.id);
+        document.getElementById("ph-advert-text").value = ""; out.hidden = true; out.innerHTML = "";
+        setPhMessage(`Added ${p.programme} at ${p.university}. Open it and press Prepare everything.`);
+      }
+      renderPhd();
+    } })]));
   }
 
   function renderPhdRow(p) {
@@ -865,7 +1018,38 @@
     checks.appendChild(grid);
     body.appendChild(checks);
 
-    const prop = el("textarea", { "aria-label": "Research proposal", placeholder: "Paste the research proposal you are sending to this programme, or attach it below." });
+    // ---- the application pack
+    const allBusy = state.busy.has(p.id + ":all");
+    const pack = el("div", { class: "pack" }, [el("h4", { text: "Application pack" })]);
+    pack.appendChild(el("p", { class: "small", text: "Prepare everything writes the personal statement, tailors your proposal to this programme, drafts the supervisor email and reviews the proposal. They are drafts from your CV and proposal: read and edit each before you use it." }));
+    const allBtn = el("button", { class: "btn", text: allBusy ? "Preparing…" : "Prepare everything", onclick: () => phdPrepareAll(p) });
+    if (allBusy) allBtn.setAttribute("disabled", "");
+    pack.appendChild(el("div", { class: "row" }, [allBtn, el("button", { class: "btn", text: "Download this pack (.zip)", onclick: () => downloadOne(p) })]));
+    body.appendChild(pack);
+
+    const pl = PH.plan(p);
+    const planBox = el("div", {}, [el("h4", { text: "Plan, counting back from the deadline" })]);
+    if (!pl) planBox.appendChild(el("div", { class: "small", text: "Set a deadline above and the dated plan appears here." }));
+    else {
+      const ul = el("ul", { class: "plan" });
+      for (const m of pl) {
+        ul.appendChild(el("li", { class: m.done ? "done" : "" }, [
+          el("span", { text: m.done ? "✓" : "" }), el("span", { text: m.date }), el("span", { text: m.label }),
+          m.late && !m.done ? el("span", { class: "late-tag", text: "behind" }) : el("span"),
+        ]));
+      }
+      planBox.appendChild(ul);
+    }
+    body.appendChild(planBox);
+
+    if (p.requirements.length || p.advert) {
+      const ad = el("details", {}, [el("summary", { class: "small", text: "The advert" })]);
+      if (p.requirements.length) ad.appendChild(el("ul", { class: "found-list" }, p.requirements.map((r) => el("li", { text: r }))));
+      if (p.advert) ad.appendChild(el("pre", { class: "draft-text", text: p.advert }));
+      body.appendChild(ad);
+    }
+
+    const prop = el("textarea", { "aria-label": "Research proposal", placeholder: "Paste the research proposal you are sending to this programme, or attach it below. Your original is never changed by the tailoring." });
     prop.value = p.proposal || "";
     prop.addEventListener("change", () => { p.proposal = prop.value; touch(); });
     const propFile = el("input", { type: "file", accept: ".txt,.md,.pdf", "aria-label": "Load a proposal from a file" });
@@ -878,18 +1062,17 @@
         p.proposal = text; touch(); state.openPhd.add(p.id); renderPhd();
       } catch (e) { setPhMessage(e.message || String(e)); }
     });
-    const reviewBtn = el("button", { class: "btn", text: state.busy.has(p.id + ":review") ? "Reviewing…" : (p.proposalReview ? "Review again" : "Review against this programme"), onclick: () => phdGenerate(p, "review") });
-    if (state.busy.has(p.id + ":review")) reviewBtn.setAttribute("disabled", "");
-    const proposal = el("div", {}, [el("h4", { text: "Research proposal" }), prop,
-      el("div", { class: "row" }, [propFile, reviewBtn]),
-      el("div", { class: "note", text: "The review is a second reader, not a rewrite: it says how well the proposal fits this theme, what a selector would ask, and what to change. It uses your saved CV and your Gemini key." })]);
+    const proposal = el("div", {}, [el("h4", { text: "Your research proposal" }), prop,
+      el("div", { class: "row" }, [propFile, genButton(p, "review")]),
+      el("div", { class: "note", text: "The review is a second reader, not a rewrite: how well the proposal fits this theme, what a selector would ask, what to change." })]);
     if (p.proposalReview) proposal.appendChild(el("pre", { class: "draft-text", text: p.proposalReview }));
     body.appendChild(proposal);
 
+    body.appendChild(textBlock(p, "Proposal tailored to this programme", "tailoredProposal", "tailor"));
+    body.appendChild(textBlock(p, "Personal statement", "statement", "statement"));
+
     const mail = el("div", {}, [el("h4", { text: "Email to the supervisor" })]);
-    const mailBtn = el("button", { class: "btn", text: state.busy.has(p.id + ":email") ? "Drafting…" : (p.supervisorDraft ? "Redraft" : "Draft supervisor email"), onclick: () => phdGenerate(p, "email") });
-    if (state.busy.has(p.id + ":email")) mailBtn.setAttribute("disabled", "");
-    const mailRow = el("div", { class: "row" }, [mailBtn]);
+    const mailRow = el("div", { class: "row" }, [genButton(p, "email")]);
     if (p.supervisorDraft) {
       mail.appendChild(el("pre", { class: "draft-text", text: p.supervisorDraft }));
       mailRow.appendChild(el("button", { class: "btn", text: "Copy", onclick: () => copyText(p.supervisorDraft) }));
@@ -901,6 +1084,24 @@
     }
     mail.appendChild(mailRow);
     body.appendChild(mail);
+
+    const refs = el("div", {}, [el("h4", { text: "Referee request emails" })]);
+    const refGrid = el("div", { class: "form-grid" });
+    for (let i = 0; i < 2; i++) {
+      const inp = el("input", { type: "text", "aria-label": `Referee ${i + 1}`, placeholder: "e.g. Dr Jane Smith" });
+      inp.value = (p.referees && p.referees[i]) || "";
+      inp.addEventListener("change", () => { p.referees = p.referees || ["", ""]; p.referees[i] = inp.value.trim(); touch(); state.openPhd.add(p.id); renderPhd(); });
+      refGrid.appendChild(el("div", {}, [el("label", { text: `Referee ${i + 1}` }), inp]));
+    }
+    refs.appendChild(refGrid);
+    const named = (p.referees || []).filter((r) => (r || "").trim());
+    for (const r of named) {
+      const mailText = PH.refereeRequest(p, r, myName());
+      refs.appendChild(el("details", {}, [el("summary", { class: "small", text: `Request to ${r}` }), el("pre", { class: "draft-text", text: mailText }),
+        el("div", { class: "row" }, [el("button", { class: "btn", text: "Copy", onclick: () => copyText(mailText) })])]));
+    }
+    if (!named.length) refs.appendChild(el("div", { class: "note", text: "Enter your referees' names and a ready-to-send request appears for each. These are written from a fixed template, not by AI." }));
+    body.appendChild(refs);
 
     const notes = el("textarea", { "aria-label": "Notes", placeholder: "Replies, calls, portal login hints, what the supervisor said." });
     notes.value = p.notes || "";
@@ -962,6 +1163,14 @@
   }
 
   function wirePhd() {
+    document.getElementById("ph-advert-read").addEventListener("click", readAdvert);
+    document.getElementById("ph-advert-clear").addEventListener("click", () => {
+      document.getElementById("ph-advert-text").value = "";
+      const o = document.getElementById("ph-advert-result"); o.hidden = true; o.innerHTML = "";
+    });
+    const nameBox = document.getElementById("ph-myname");
+    nameBox.value = myName();
+    nameBox.addEventListener("change", () => { lsSet(LS.myName, nameBox.value.trim()); renderPhd(); });
     document.getElementById("ph-search").addEventListener("input", (e) => { state.phSearch = e.target.value; renderPhd(); });
     document.getElementById("ph-filter").addEventListener("change", (e) => { state.phFilter = e.target.value; renderPhd(); });
     document.getElementById("ph-zip").addEventListener("click", () => downloadZip(setPhMessage));
