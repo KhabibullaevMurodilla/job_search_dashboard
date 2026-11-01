@@ -212,6 +212,8 @@
   @media (max-width: 560px) {
     #tabs { padding: 0 12px; }
     .next-list li { grid-template-columns: 1fr; gap: 4px; }
+    .plan li { grid-template-columns: 22px 1fr; }
+    .plan li > :nth-child(n+3) { grid-column: 2; }
   }
 
   /* PhD tab */
@@ -228,6 +230,15 @@
   .check-grid label { color: var(--carbon); display: flex; gap: 8px; align-items: baseline; font-size: 13px; margin: 0; cursor: pointer; }
   .check-grid input { width: auto; margin: 0; }
   details.add { margin-bottom: 18px; max-width: 760px; }
+  .plan { list-style: none; margin: 0; padding: 0; }
+  .plan li { display: grid; grid-template-columns: 22px 92px 1fr auto; gap: 8px; align-items: baseline; font-size: 13px; padding: 3px 0; }
+  .plan li.done { color: var(--muted); text-decoration: line-through; }
+  .plan .late-tag { color: var(--denied); font-size: 11.5px; border: 1px solid currentColor; padding: 0 6px; }
+  .found-list { list-style: none; margin: 6px 0; padding: 0; font-size: 13px; }
+  .found-list li { padding: 2px 0; }
+  .warn-list { margin: 6px 0; padding-left: 18px; font-size: 13px; color: var(--caution); }
+  .pack { border: 1px solid var(--carbon); padding: 12px 14px; }
+  .pack h4 { margin-top: 0; }
   details.add > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 </style>
 </head>
@@ -322,7 +333,18 @@
         <button class="btn" id="ph-export">Export backup (.json)</button>
         <label class="btn" for="ph-import" style="margin:0;cursor:pointer">Import backup</label>
         <input type="file" id="ph-import" accept=".json" hidden>
+        <input type="text" id="ph-myname" placeholder="your name, for emails" aria-label="Your name, used to sign emails and statements">
       </div>
+      <details class="add" id="ph-advert-box" open>
+        <summary>Start from an advert</summary>
+        <p class="small" style="max-width:62ch">Paste a PhD advert. You get a CV match and a list of what the advert does and does not say straight away. With your Gemini key it also reads out the university, theme, supervisor, funding and deadline, so you can add the programme in one click and then prepare its whole application pack.</p>
+        <textarea id="ph-advert-text" aria-label="PhD advert" placeholder="Paste the full advert text here."></textarea>
+        <div class="row">
+          <button class="btn" id="ph-advert-read">Read this advert</button>
+          <button class="btn" id="ph-advert-clear">Clear</button>
+        </div>
+        <div id="ph-advert-result" class="result" hidden></div>
+      </details>
       <details class="add" id="ph-add">
         <summary>Add a programme</summary>
         <div class="form-grid">
