@@ -20,6 +20,7 @@
   const DC = self.DashboardCore;
   const SC = self.SponsorCheck;
   const A = self.Applications;
+  const PH = self.Phd;
 
   const LS = {
     cv: "jr_cv_text",
@@ -27,6 +28,7 @@
     geminiKey: "jr_gemini_key",
     status: "jr_role_status",     // {uid: "applied"|"skipped"}
     apps: "jr_applications",      // [application records, see lib/applications.js]
+    phd: "jr_phd",                // [PhD application records, see lib/phd.js]
   };
 
   const GEMINI_MODEL = "gemini-3.6-flash";
@@ -45,7 +47,7 @@
       // A save that fails must not look like one that worked: say so where
       // the person is looking, and point at the backup that does not depend
       // on browser storage.
-      const m = document.getElementById("ap-message");
+      const m = document.getElementById(state.tab === "phd" ? "ph-message" : "ap-message");
       if (m) m.textContent = "Your browser's storage is full, so the last change was not saved. "
         + "Use Export backup, then delete something you no longer need.";
       return false;
@@ -58,6 +60,8 @@
     cvText: lsGet(LS.cv, ""),
     statusByUid: lsGet(LS.status, {}),
     apps: lsGet(LS.apps, []),
+    phd: self.Phd.normalizeAll(lsGet(LS.phd, [])),
+    phFilter: "all", phSearch: "", openPhd: new Set(), busy: new Set(),
     tab: "roles",
     apFilter: "all", apSearch: "",
     openApps: new Set(),
@@ -147,6 +151,7 @@
   }
 
   function saveApps() { return lsSet(LS.apps, state.apps); }
+  function savePhd() { return lsSet(LS.phd, state.phd); }
 
   // Scores follow the CV you have now, so a better CV lifts every saved role.
   // Writes only when a score actually moved. This runs at page load, and an
@@ -410,11 +415,12 @@
     for (const b of document.querySelectorAll("#tabs [data-tab]")) {
       b.setAttribute("aria-selected", b.dataset.tab === name ? "true" : "false");
     }
-    for (const t of ["roles", "score", "apps"]) {
+    for (const t of ["roles", "score", "apps", "phd"]) {
       document.getElementById("view-" + t).hidden = t !== name;
     }
     document.getElementById("panel-filters").hidden = name !== "roles";
     if (name === "apps") renderApps();
+    if (name === "phd") renderPhd();
   }
 
   // ------------------------------------------------- score a posting
@@ -672,21 +678,25 @@
   // ------------------------------------------- keep it all locally
   function setApMessage(t) { document.getElementById("ap-message").textContent = t; }
 
+  // Job applications and PhD applications go in one archive: jobs by company
+  // at the top level, PhD applications under phd/.
   function allFiles() {
     const files = [];
     for (const a of state.apps) files.push(...A.folderPlan(a).files);
+    for (const p of state.phd) files.push(...PH.folderPlan(p).files);
     return files;
   }
 
-  function downloadZip() {
-    if (!state.apps.length) { setApMessage("Nothing to download yet."); return; }
+  function downloadZip(say) {
+    const note = say || setApMessage;
+    if (!state.apps.length && !state.phd.length) { note("Nothing to download yet."); return; }
     const files = allFiles();
     downloadBlob(new Blob([self.Zip.build(files)], { type: "application/zip" }), "job-applications.zip");
-    setApMessage(`Downloaded ${files.length} files, one folder per company and role.`);
+    note(`Downloaded ${files.length} files: one folder per company and role, and PhD applications under phd/.`);
   }
 
   async function saveToFolder() {
-    if (!state.apps.length) { setApMessage("Nothing to save yet."); return; }
+    if (!state.apps.length && !state.phd.length) { setApMessage("Nothing to save yet."); return; }
     try {
       const root = await window.showDirectoryPicker({ mode: "readwrite" });
       const files = allFiles();
@@ -713,6 +723,279 @@
       saveApps(); renderApps();
       setApMessage(`Imported: ${r.added} new, ${r.updated} updated.`);
     } catch (e) { setApMessage(e.message || String(e)); }
+  }
+
+
+  // ------------------------------------------------- PhD applications
+  function setPhMessage(t) { document.getElementById("ph-message").textContent = t; }
+
+  function dlClass(info) { return info.level === "none" || info.level === "closed" ? "" : "dl-" + info.level; }
+
+  function renderPhdDashboard() {
+    const root = document.getElementById("ph-dashboard");
+    root.innerHTML = "";
+    const st = PH.stats(state.phd);
+    if (!st.total) {
+      root.appendChild(el("div", { class: "empty", text: "No programmes yet. Use Add a programme above: each one gets a checklist, a deadline, a place for your research proposal, and a supervisor email draft." }));
+      return;
+    }
+    if (st.upcoming.length) {
+      root.appendChild(el("h3", { text: "Next deadlines", style: "margin:0 0 6px;font-size:13px" }));
+      const ul = el("ul", { class: "next-list" });
+      for (const u of st.upcoming.slice(0, 5)) {
+        const info = PH.deadlineInfo(state.phd.find((p) => p.id === u.id));
+        ul.appendChild(el("li", {}, [
+          el("span", { text: `${u.university}, ${u.programme}` }),
+          el("span", { class: `pill ${dlClass(info)}`, text: `${u.deadline}: ${info.label}` }),
+          el("span", { class: "small", text: `${u.pct}% ready` }),
+        ]));
+      }
+      root.appendChild(ul);
+    }
+    const charts = el("div", { class: "charts" });
+    const funnel = el("div", { class: "chart" }, [el("h3", { text: "Where your programmes stand" })]);
+    const max = Math.max(1, ...PH.STATUSES.map((k) => st.byStatus[k]));
+    for (const k of PH.STATUSES) funnel.appendChild(barRow(k[0].toUpperCase() + k.slice(1), st.byStatus[k], max, k));
+    charts.appendChild(funnel);
+    root.appendChild(charts);
+
+    const ins = el("div", { class: "insights" });
+    const line = (t) => ins.appendChild(el("p", { text: t }));
+    line(`${st.total} programme${st.total === 1 ? "" : "s"}: ${st.open} still being prepared, ${st.submitted} submitted${st.answered ? `, ${st.answered} answered` : ""}.`);
+    if (st.avgReadiness != null) line(`The ones still open are on average ${st.avgReadiness}% ready (ticked checklist items).`);
+    if (st.overdue) line(`${st.overdue} open programme${st.overdue === 1 ? " has" : "s have"} a deadline that has passed. Mark ${st.overdue === 1 ? "it" : "them"} submitted or withdrawn, or fix the date.`);
+    line(`${st.withProposal} of ${st.total} have a research proposal saved here.`);
+    root.appendChild(ins);
+  }
+
+  // Run one Gemini job for a record, with the button showing it is working.
+  async function phdGenerate(p, kind) {
+    const key = p.id + ":" + kind;
+    if (state.busy.has(key)) return;
+    state.busy.add(key);
+    setPhMessage(kind === "email" ? "Drafting the supervisor email with Gemini…" : "Reviewing the proposal with Gemini…");
+    renderPhd();
+    try {
+      if (!state.cvText.trim()) throw new Error("Upload or paste your CV first (left panel). Both are written against it.");
+      if (kind === "review" && !(p.proposal || "").trim()) throw new Error("Paste your research proposal into this programme first.");
+      if (kind === "email" && !(p.theme || p.supervisor || p.programme)) throw new Error("Add the theme or supervisor first.");
+      const text = await callGemini(kind === "email"
+        ? PH.buildSupervisorEmailPrompt(p, state.cvText)
+        : PH.buildProposalReviewPrompt(p, state.cvText));
+      if (kind === "email") {
+        p.supervisorDraft = text;
+        const q = PH.qualityCheckEmail(text, p);
+        setPhMessage(q.ok ? `Email drafted (${q.words} words) and saved here.` : "Email drafted and saved, but check: " + q.problems.join(" "));
+      } else {
+        p.proposalReview = text;
+        setPhMessage("Review saved under the proposal.");
+      }
+      p.updatedAt = new Date().toISOString();
+      savePhd();
+    } catch (e) {
+      setPhMessage(e.message || String(e));
+    } finally {
+      state.busy.delete(key);
+      state.openPhd.add(p.id);
+      renderPhd();
+    }
+  }
+
+  function renderPhdRow(p) {
+    const d = el("details", { class: "app" });
+    d.dataset.id = p.id;
+    if (state.openPhd.has(p.id)) d.setAttribute("open", "");
+    d.addEventListener("toggle", () => { if (d.open) state.openPhd.add(p.id); else state.openPhd.delete(p.id); });
+    const touch = () => { p.updatedAt = new Date().toISOString(); savePhd(); };
+    const r = PH.readiness(p);
+    const info = PH.deadlineInfo(p);
+
+    const chips = [el("span", { class: `pill st-${p.status}`, text: p.status })];
+    if (info.level !== "closed" && info.level !== "none") chips.push(el("span", { class: `pill ${dlClass(info)}`, text: info.label }));
+    chips.push(el("span", { class: "chip" }, [
+      el("span", { class: "meter", role: "img", "aria-label": `${r.pct}% of the checklist ticked` }, [el("i", { style: `width:${r.pct}%` })]),
+      document.createTextNode(`${r.done}/${r.total}`),
+    ]));
+    d.appendChild(el("summary", {}, [
+      el("div", {}, [
+        el("div", { class: "app-title", text: p.programme }),
+        el("div", { class: "app-meta", text: p.university + (p.theme ? ", " + p.theme : "") }),
+      ]),
+      el("div", { class: "role-chips", style: "margin:0" }, chips),
+    ]));
+
+    const body = el("div", { class: "app-body" });
+
+    const sel = el("select", { "aria-label": "Status", style: "width:auto" });
+    for (const k of PH.STATUSES) sel.appendChild(el("option", { value: k, text: k }));
+    sel.value = p.status;
+    sel.addEventListener("change", () => { PH.setStatus(p, sel.value); savePhd(); renderPhd(); });
+    const top = el("div", { class: "row", style: "margin:0;align-items:center" }, [sel]);
+    if (p.url) top.appendChild(el("a", { href: p.url, target: "_blank", rel: "noopener", class: "btn", text: "Open programme page" }));
+    top.appendChild(el("span", { class: "small", text: `Added ${p.createdAt.slice(0, 10)}${p.submittedAt ? ", submitted " + p.submittedAt.slice(0, 10) : ""}` }));
+    body.appendChild(top);
+
+    const field = (label, value, type, apply) => {
+      const input = el("input", { type: type || "text", "aria-label": label });
+      input.value = value || "";
+      input.addEventListener("change", () => { apply(input.value); touch(); renderPhd(); });
+      return el("div", {}, [el("label", { text: label }), input]);
+    };
+    const fundSel = el("select", { "aria-label": "Funding" });
+    for (const f of PH.FUNDING) fundSel.appendChild(el("option", { value: f, text: f }));
+    fundSel.value = p.funding;
+    fundSel.addEventListener("change", () => { p.funding = fundSel.value; touch(); });
+    body.appendChild(el("div", { class: "form-grid" }, [
+      field("Deadline", p.deadline, "date", (v) => { p.deadline = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ""; }),
+      el("div", {}, [el("label", { text: "Funding" }), fundSel]),
+      field("Supervisor", p.supervisor, "text", (v) => { p.supervisor = v.trim(); }),
+      field("Supervisor email", p.supervisorEmail, "text", (v) => { p.supervisorEmail = v.trim(); }),
+      field("Research theme", p.theme, "text", (v) => { p.theme = v.trim(); }),
+      field("Programme page", p.url, "text", (v) => { p.url = v.trim(); }),
+    ]));
+
+    const checks = el("div", {}, [el("h4", { text: `Before you submit (${r.done} of ${r.total} done)` })]);
+    const grid = el("div", { class: "check-grid" });
+    for (const c of PH.CHECKLIST) {
+      const cb = el("input", { type: "checkbox", id: `ck-${p.id}-${c.key}` });
+      cb.checked = !!p.checklist[c.key];
+      cb.addEventListener("change", () => { PH.setCheck(p, c.key, cb.checked); savePhd(); state.openPhd.add(p.id); renderPhd(); });
+      grid.appendChild(el("label", { for: cb.id }, [cb, document.createTextNode(c.label)]));
+    }
+    checks.appendChild(grid);
+    body.appendChild(checks);
+
+    const prop = el("textarea", { "aria-label": "Research proposal", placeholder: "Paste the research proposal you are sending to this programme, or attach it below." });
+    prop.value = p.proposal || "";
+    prop.addEventListener("change", () => { p.proposal = prop.value; touch(); });
+    const propFile = el("input", { type: "file", accept: ".txt,.md,.pdf", "aria-label": "Load a proposal from a file" });
+    propFile.addEventListener("change", async () => {
+      const f = propFile.files[0];
+      if (!f) return;
+      try {
+        const text = await fileToText(f);
+        if (!text.trim()) throw new Error("No text could be read from that file (a scanned PDF has none).");
+        p.proposal = text; touch(); state.openPhd.add(p.id); renderPhd();
+      } catch (e) { setPhMessage(e.message || String(e)); }
+    });
+    const reviewBtn = el("button", { class: "btn", text: state.busy.has(p.id + ":review") ? "Reviewing…" : (p.proposalReview ? "Review again" : "Review against this programme"), onclick: () => phdGenerate(p, "review") });
+    if (state.busy.has(p.id + ":review")) reviewBtn.setAttribute("disabled", "");
+    const proposal = el("div", {}, [el("h4", { text: "Research proposal" }), prop,
+      el("div", { class: "row" }, [propFile, reviewBtn]),
+      el("div", { class: "note", text: "The review is a second reader, not a rewrite: it says how well the proposal fits this theme, what a selector would ask, and what to change. It uses your saved CV and your Gemini key." })]);
+    if (p.proposalReview) proposal.appendChild(el("pre", { class: "draft-text", text: p.proposalReview }));
+    body.appendChild(proposal);
+
+    const mail = el("div", {}, [el("h4", { text: "Email to the supervisor" })]);
+    const mailBtn = el("button", { class: "btn", text: state.busy.has(p.id + ":email") ? "Drafting…" : (p.supervisorDraft ? "Redraft" : "Draft supervisor email"), onclick: () => phdGenerate(p, "email") });
+    if (state.busy.has(p.id + ":email")) mailBtn.setAttribute("disabled", "");
+    const mailRow = el("div", { class: "row" }, [mailBtn]);
+    if (p.supervisorDraft) {
+      mail.appendChild(el("pre", { class: "draft-text", text: p.supervisorDraft }));
+      mailRow.appendChild(el("button", { class: "btn", text: "Copy", onclick: () => copyText(p.supervisorDraft) }));
+      if (p.supervisorEmail) {
+        const m = p.supervisorDraft.match(/^subject:\s*(.*)\n+([\s\S]*)$/i);
+        const href = "mailto:" + encodeURIComponent(p.supervisorEmail) + "?subject=" + encodeURIComponent(m ? m[1] : "") + "&body=" + encodeURIComponent(m ? m[2] : p.supervisorDraft);
+        mailRow.appendChild(el("a", { class: "btn", href, text: "Open in email app" }));
+      }
+    }
+    mail.appendChild(mailRow);
+    body.appendChild(mail);
+
+    const notes = el("textarea", { "aria-label": "Notes", placeholder: "Replies, calls, portal login hints, what the supervisor said." });
+    notes.value = p.notes || "";
+    notes.addEventListener("change", () => { p.notes = notes.value; touch(); });
+    body.appendChild(el("div", {}, [el("h4", { text: "Notes" }), notes]));
+
+    const docs = el("div", {}, [el("h4", { text: "Documents for this application" })]);
+    for (const doc of p.docs) {
+      docs.appendChild(el("div", { class: "doc-row" }, [
+        el("span", { text: doc.name }),
+        el("span", { class: "pill", text: doc.kind.replace("_", " ") }),
+        el("button", { class: "btn", onclick: () => viewTextModal(doc.name, doc.text), text: "View" }),
+        el("button", { class: "btn", onclick: () => { p.docs = p.docs.filter((x) => x.id !== doc.id); touch(); renderPhd(); }, text: "Remove" }),
+      ]));
+    }
+    const kind = el("select", { "aria-label": "Document type", style: "width:auto" }, [
+      el("option", { value: "transcript", text: "Transcript" }), el("option", { value: "reference", text: "Reference" }),
+      el("option", { value: "statement", text: "Personal statement" }), el("option", { value: "cv", text: "CV" }), el("option", { value: "other", text: "Other" }),
+    ]);
+    const attach = el("input", { type: "file", accept: ".txt,.md,.pdf", "aria-label": "Attach a document" });
+    attach.addEventListener("change", async () => {
+      const f = attach.files[0];
+      if (!f) return;
+      try {
+        const text = await fileToText(f);
+        if (!text.trim()) throw new Error("No text could be read from that file (a scanned PDF has none).");
+        PH.addDoc(p, { name: f.name, kind: kind.value, text });
+        savePhd(); state.openPhd.add(p.id); renderPhd();
+      } catch (e) { setPhMessage(e.message || String(e)); }
+    });
+    docs.appendChild(el("div", { class: "row" }, [kind, attach]));
+    docs.appendChild(el("div", { class: "note", text: "The text of the file is stored in this browser. The original file is not kept, so keep your own copy." }));
+    body.appendChild(docs);
+
+    body.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", onclick: () => {
+      if (!window.confirm(`Delete ${p.programme} at ${p.university} and everything saved with it?`)) return;
+      state.phd = state.phd.filter((x) => x !== p);
+      savePhd(); renderPhd();
+    }, text: "Delete this programme" })]));
+
+    d.appendChild(body);
+    return d;
+  }
+
+  function renderPhd() {
+    renderPhdDashboard();
+    const list = document.getElementById("ph-list");
+    list.innerHTML = "";
+    const q = state.phSearch.trim().toLowerCase();
+    // Soonest deadline first among the open ones, then the rest by last change.
+    const open = (p) => ["submitted", "interview", "offer", "rejected", "withdrawn"].indexOf(p.status) < 0;
+    const rows = state.phd.filter((p) =>
+      (state.phFilter === "all" || p.status === state.phFilter)
+      && (!q || (p.university + " " + p.programme + " " + p.theme + " " + p.supervisor).toLowerCase().includes(q)))
+      .sort((a, b) => (open(b) - open(a))
+        || (open(a) ? (a.deadline || "9999").localeCompare(b.deadline || "9999") : (b.updatedAt || "").localeCompare(a.updatedAt || "")));
+    for (const p of rows) list.appendChild(renderPhdRow(p));
+    if (state.phd.length && !rows.length) list.appendChild(el("div", { class: "empty", text: "No programme matches that search or status." }));
+  }
+
+  function wirePhd() {
+    document.getElementById("ph-search").addEventListener("input", (e) => { state.phSearch = e.target.value; renderPhd(); });
+    document.getElementById("ph-filter").addEventListener("change", (e) => { state.phFilter = e.target.value; renderPhd(); });
+    document.getElementById("ph-zip").addEventListener("click", () => downloadZip(setPhMessage));
+    document.getElementById("ph-export").addEventListener("click", () => {
+      downloadBlob(new Blob([PH.exportJson(state.phd)], { type: "application/json" }), "phd-applications-backup.json");
+      setPhMessage("Backup downloaded. Import it on any browser to continue where you left off.");
+    });
+    document.getElementById("ph-import").addEventListener("change", async (e) => {
+      const file = e.target.files[0]; e.target.value = "";
+      if (!file) return;
+      try {
+        const r = PH.mergeImport(state.phd, PH.parseImport(await file.text()));
+        savePhd(); renderPhd();
+        setPhMessage(`Imported: ${r.added} new, ${r.updated} updated.`);
+      } catch (err) { setPhMessage(err.message || String(err)); }
+    });
+    document.getElementById("ph-save").addEventListener("click", () => {
+      const v = (id) => document.getElementById(id).value;
+      if (!v("ph-university").trim()) { setPhMessage("Add the university's name first."); return; }
+      const p = PH.newPhd({
+        university: v("ph-university"), programme: v("ph-programme"), theme: v("ph-theme"),
+        supervisor: v("ph-supervisor"), supervisorEmail: v("ph-semail"), funding: v("ph-funding"),
+        deadline: v("ph-deadline"), url: v("ph-url"),
+      });
+      state.phd.push(p);
+      if (savePhd()) {
+        for (const id of ["ph-university", "ph-programme", "ph-theme", "ph-supervisor", "ph-semail", "ph-deadline", "ph-url"]) document.getElementById(id).value = "";
+        document.getElementById("ph-funding").value = "unknown";
+        document.getElementById("ph-add").open = false;
+        state.openPhd.add(p.id);
+        setPhMessage(`Added ${p.programme} at ${p.university}. Tick things off in its checklist as you get them ready.`);
+      }
+      renderPhd();
+    });
   }
 
   // ------------------------------------------------------------- setup
@@ -776,7 +1059,7 @@
     });
     document.getElementById("ap-search").addEventListener("input", (e) => { state.apSearch = e.target.value; renderApps(); });
     document.getElementById("ap-filter").addEventListener("change", (e) => { state.apFilter = e.target.value; renderApps(); });
-    document.getElementById("ap-zip").addEventListener("click", downloadZip);
+    document.getElementById("ap-zip").addEventListener("click", () => downloadZip(setApMessage));
     document.getElementById("ap-export").addEventListener("click", () => {
       downloadBlob(new Blob([A.exportJson(state.apps)], { type: "application/json" }), "job-applications-backup.json");
       setApMessage("Backup downloaded. Import it on any browser to continue where you left off.");
@@ -784,6 +1067,7 @@
     document.getElementById("ap-import").addEventListener("change", (e) => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ""; });
     const folderBtn = document.getElementById("ap-folder");
     if (typeof window.showDirectoryPicker === "function") { folderBtn.hidden = false; folderBtn.addEventListener("click", saveToFolder); }
+    wirePhd();
     document.getElementById("modal-close").addEventListener("click", closeModal);
     document.getElementById("modal").addEventListener("click", (e) => {
       if (e.target.id === "modal") closeModal();
@@ -793,11 +1077,13 @@
   // Another tab changed the library or the marked-applied list: take its
   // version, so this tab's next save builds on it instead of replacing it.
   window.addEventListener("storage", (e) => {
-    if (e.key !== LS.apps && e.key !== LS.status) return;
+    if (e.key !== LS.apps && e.key !== LS.status && e.key !== LS.phd) return;
     state.apps = lsGet(LS.apps, []);
+    state.phd = PH.normalizeAll(lsGet(LS.phd, []));
     state.statusByUid = lsGet(LS.status, {});
     render();
     if (state.tab === "apps") renderApps();
+    if (state.tab === "phd") renderPhd();
   });
 
   document.addEventListener("DOMContentLoaded", () => {
