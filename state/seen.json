@@ -1,5 +1,5 @@
 {
- "runs": 18,
+ "runs": 19,
  "seen": {
   "00221290f532a03b": {
    "company": "Athora",
@@ -286,7 +286,7 @@
   "230407672f765d2e": {
    "company": "Computacenter",
    "first_seen": "2026-10-20",
-   "last_seen": "2026-10-25",
+   "last_seen": "2026-11-01",
    "title": "Wintel Infrastructure Engineer"
   },
   "2535992067438be9": {
@@ -732,6 +732,12 @@
    "first_seen": "2026-11-01",
    "last_seen": "2026-11-01",
    "title": "UKI Technology Consulting - Cloud Engineer, Senior Consultant"
+  },
+  "5297b19cff8bf1f9": {
+   "company": "The Investigo Group",
+   "first_seen": "2026-11-01",
+   "last_seen": "2026-11-01",
+   "title": "Technical Systems Support Engineer"
   },
   "52fdd961d2796da4": {
    "company": "Ellison Institute of Technology",
@@ -3221,7 +3227,7 @@
   "https://boards-api.greenhouse.io/v1/boards/fluxon/jobs?content=true&pay_transparency=true": 16,
   "https://boards-api.greenhouse.io/v1/boards/footanstey/jobs?content=true&pay_transparency=true": 21,
   "https://boards-api.greenhouse.io/v1/boards/form3/jobs?content=true&pay_transparency=true": 7,
-  "https://boards-api.greenhouse.io/v1/boards/forter/jobs?content=true&pay_transparency=true": 22,
+  "https://boards-api.greenhouse.io/v1/boards/forter/jobs?content=true&pay_transparency=true": 23,
   "https://boards-api.greenhouse.io/v1/boards/fosphamarketing/jobs?content=true&pay_transparency=true": 13,
   "https://boards-api.greenhouse.io/v1/boards/found/jobs?content=true&pay_transparency=true": 3,
   "https://boards-api.greenhouse.io/v1/boards/fractile/jobs?content=true&pay_transparency=true": 39,
@@ -4107,7 +4113,7 @@
   "https://fa-evax-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 200,
   "https://fa-evcg-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 200,
   "https://fa-evdq-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 74,
-  "https://fa-evlj-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 169,
+  "https://fa-evlj-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 170,
   "https://fa-evmb-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 5,
   "https://fa-evmr-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 200,
   "https://fa-evrg-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 37,
@@ -4242,7 +4248,7 @@
   "https://houthoff.recruitee.com/api/offers/": 17,
   "https://howard.wd1.myworkdayjobs.com/wday/cxs/howard/HU/jobs": 5,
   "https://howden.recruitee.com/api/offers/": 28,
-  "https://hp.wd5.myworkdayjobs.com/wday/cxs/hp/ExternalCareerSite/jobs": 160,
+  "https://hp.wd5.myworkdayjobs.com/wday/cxs/hp/ExternalCareerSite/jobs": 161,
   "https://hq-lifeway.icims.com/jobs/search?ss=1&in_iframe=1": 13,
   "https://huaweiaustria.teamtailor.com/jobs.rss?per_page=200": 23,
   "https://hubcareers-docusign.icims.com/jobs/search?ss=1&in_iframe=1": 50,
@@ -4266,7 +4272,7 @@
   "https://iagime.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 5,
   "https://iahgme.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 20,
   "https://iahmme.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 88,
-  "https://iahxgs.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 193,
+  "https://iahxgs.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 192,
   "https://iaings.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 64,
   "https://ialime.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 22,
   "https://iawmqy.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=CX_1,limit=200,sortBy=POSTING_DATES_DESC": 200,
@@ -4322,7 +4328,7 @@
   "https://jobs-sdgoodwill.icims.com/jobs/search?ss=1&in_iframe=1": 20,
   "https://jobs-townandcountrymarkets.icims.com/jobs/search?ss=1&in_iframe=1": 19,
   "https://jobs-uniquely.icims.com/jobs/search?ss=1&in_iframe=1": 3,
-  "https://jobs.computacenter.com/search/?q=&sortColumn=referencedate&sortDirection=desc": 191,
+  "https://jobs.computacenter.com/search/?q=&sortColumn=referencedate&sortDirection=desc": 190,
   "https://jobs.ea.com/pl_PL/careers/SearchJobs/?jobRecordsPerPage=50": 83,
   "https://jobs.frequentis.com/karriere/SearchJobs/?jobRecordsPerPage=50": 22,
   "https://jobs.jobvite.com/co-careers/jobs": 1,
@@ -4372,7 +4378,7 @@
   "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=Germany": 47,
   "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=Ireland": 22,
   "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=Netherlands": 31,
-  "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=United+Kingdom": 291,
+  "https://jobs.workable.com/api/v1/jobs?query=Systems+Engineer&location=United+Kingdom": 297,
   "https://jobs1-spectrumhealthcare.icims.com/jobs/search?ss=1&in_iframe=1": 10,
   "https://jobs2-spectrumhealthcare.icims.com/jobs/search?ss=1&in_iframe=1": 2,
   "https://jobsatlanticlabsfoodlabs.recruitee.com/api/offers/": 14,
@@ -4399,7 +4405,7 @@
   "https://klu.jobs.personio.de/xml": 7,
   "https://knightfrank.wd103.myworkdayjobs.com/wday/cxs/knightfrank/KF/jobs": 0,
   "https://knott.jobs.personio.de/xml": 16,
-  "https://koch.avature.net/ko_KR/careers/SearchJobs/?jobRecordsPerPage=50": 40,
+  "https://koch.avature.net/ko_KR/careers/SearchJobs/?jobRecordsPerPage=50": 41,
   "https://kolpingschulenfellbach.recruitee.com/api/offers/": 3,
   "https://kone.wd3.myworkdayjobs.com/wday/cxs/kone/careers/jobs": 19,
   "https://koninklijkeniesternsander.recruitee.com/api/offers/": 13,
@@ -4549,7 +4555,7 @@
   "https://onetp.wd1.myworkdayjobs.com/wday/cxs/onetp/Teleperformance/jobs": 59,
   "https://onpier.jobs.personio.de/xml": 2,
   "https://open.jobs.personio.de/xml": 9,
-  "https://orange.jobs/fr/fr/search-results?s=1": 294,
+  "https://orange.jobs/fr/fr/search-results?s=1": 293,
   "https://orangeburkina.recruitee.com/api/offers/": 1,
   "https://ore-energy.jobs.personio.de/xml": 4,
   "https://oregon.wd5.myworkdayjobs.com/wday/cxs/oregon/sor_external_career_site/jobs": 8,
