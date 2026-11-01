@@ -66,7 +66,7 @@
   }
   .panel h2::before { content: "— "; color: var(--muted); }
 
-  textarea, input[type=text], input[type=password], select {
+  textarea, input[type=text], input[type=password], input[type=date], select {
     width: 100%; background: var(--paper); border: 1px solid var(--carbon); color: var(--carbon);
     padding: 7px 9px; font-size: 13px; font-family: inherit; border-radius: 0;
   }
@@ -205,6 +205,30 @@
   .pill.st-offer { color: var(--approved); } .pill.st-rejected { color: var(--denied); }
   .pill.st-interview, .pill.st-applied { color: var(--carbon); }
   .small { font-size: 12px; color: var(--muted); }
+
+  /* Four tabs: scroll sideways inside the tab bar on a phone instead of widening the page. */
+  #tabs { overflow-x: auto; }
+  #tabs button { white-space: nowrap; flex: 0 0 auto; }
+  @media (max-width: 560px) {
+    #tabs { padding: 0 12px; }
+    .next-list li { grid-template-columns: 1fr; gap: 4px; }
+  }
+
+  /* PhD tab */
+  .pill.st-ready, .pill.st-submitted, .pill.st-interview, .pill.st-offer { color: var(--carbon); }
+  .pill.st-offer { color: var(--approved); }
+  .pill.dl-overdue { color: var(--denied); border-style: solid; }
+  .pill.dl-soon { color: var(--caution); }
+  .pill.dl-near { color: var(--carbon); }
+  .meter { display: inline-block; width: 64px; height: 8px; border: 1px solid var(--carbon); vertical-align: middle; margin-right: 6px; }
+  .meter > i { display: block; height: 100%; background: var(--carbon); }
+  .next-list { margin: 0 0 16px; padding: 0; list-style: none; max-width: 760px; }
+  .next-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+  .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; }
+  .check-grid label { color: var(--carbon); display: flex; gap: 8px; align-items: baseline; font-size: 13px; margin: 0; cursor: pointer; }
+  .check-grid input { width: auto; margin: 0; }
+  details.add { margin-bottom: 18px; max-width: 760px; }
+  details.add > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -216,6 +240,7 @@
   <button role="tab" id="tab-roles" data-tab="roles" aria-selected="true">Scanned roles</button>
   <button role="tab" id="tab-score" data-tab="score" aria-selected="false">Score a posting</button>
   <button role="tab" id="tab-apps" data-tab="apps" aria-selected="false">My applications</button>
+  <button role="tab" id="tab-phd" data-tab="phd" aria-selected="false">PhD applications</button>
 </div>
 <div class="layout">
   <aside>
@@ -278,6 +303,46 @@
       <div id="ps-result" class="result" hidden></div>
     </section>
 
+    <section id="view-phd" role="tabpanel" aria-labelledby="tab-phd" hidden>
+      <div class="toolbar">
+        <input type="text" id="ph-search" placeholder="search programmes" aria-label="Search PhD applications">
+        <select id="ph-filter" aria-label="Filter by status">
+          <option value="all">All statuses</option>
+          <option value="researching">Researching</option>
+          <option value="contacting">Contacting</option>
+          <option value="drafting">Drafting</option>
+          <option value="ready">Ready</option>
+          <option value="submitted">Submitted</option>
+          <option value="interview">Interview</option>
+          <option value="offer">Offer</option>
+          <option value="rejected">Rejected</option>
+          <option value="withdrawn">Withdrawn</option>
+        </select>
+        <button class="btn" id="ph-zip">Download everything (.zip)</button>
+        <button class="btn" id="ph-export">Export backup (.json)</button>
+        <label class="btn" for="ph-import" style="margin:0;cursor:pointer">Import backup</label>
+        <input type="file" id="ph-import" accept=".json" hidden>
+      </div>
+      <details class="add" id="ph-add">
+        <summary>Add a programme</summary>
+        <div class="form-grid">
+          <div><label for="ph-university">University</label><input type="text" id="ph-university"></div>
+          <div><label for="ph-programme">Programme</label><input type="text" id="ph-programme" placeholder="e.g. PhD Computer Science"></div>
+          <div class="wide"><label for="ph-theme">Research theme or project title</label><input type="text" id="ph-theme"></div>
+          <div><label for="ph-supervisor">Supervisor</label><input type="text" id="ph-supervisor"></div>
+          <div><label for="ph-semail">Supervisor email (optional)</label><input type="text" id="ph-semail"></div>
+          <div><label for="ph-funding">Funding</label>
+            <select id="ph-funding"><option>unknown</option><option>funded studentship</option><option>partly funded</option><option>self-funded</option></select></div>
+          <div><label for="ph-deadline">Deadline</label><input type="date" id="ph-deadline"></div>
+          <div class="wide"><label for="ph-url">Link to the programme page (optional)</label><input type="text" id="ph-url"></div>
+        </div>
+        <div class="row"><button class="btn" id="ph-save">Add programme</button></div>
+      </details>
+      <div id="ph-message" class="small" role="status"></div>
+      <div id="ph-dashboard"></div>
+      <div id="ph-list"></div>
+    </section>
+
     <section id="view-apps" role="tabpanel" aria-labelledby="tab-apps" hidden>
       <div class="toolbar">
         <input type="text" id="ap-search" placeholder="search saved roles" aria-label="Search applications">
@@ -320,6 +385,7 @@
 <script src="./lib/dashboard-core.js"></script>
 <script src="./lib/applications.js"></script>
 <script src="./lib/zip.js"></script>
+<script src="./lib/phd.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
