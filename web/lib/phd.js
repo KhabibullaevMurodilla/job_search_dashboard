@@ -66,6 +66,15 @@
       requirements: Array.isArray(f.requirements) ? f.requirements.filter((x) => typeof x === "string").slice(0, 20) : [],
       statement: "",
       tailoredProposal: "",
+      brief: "",             // the notes the full proposal is built from: their own, or a chosen direction
+      directions: [],        // research directions suggested from their own account
+      chosenDirection: "",
+      sources: [],           // papers found for this proposal: {id, title, authors, year, ..., use}
+      proposalFull: "",      // the written proposal, citations rendered, references appended
+      proposalNote: "",
+      proposalReport: null,  // what the checks found, kept so the screen can show it again
+      readSources: {},       // {S1: true} once the applicant has read that paper
+      targetWords: 0,        // 0 = work it out from the advert
       referees: ["", ""],
       notes: "",
       docs: [],
@@ -309,7 +318,8 @@
     return name ? `Sign off with the name "${name}".` : "End after the closing phrase with no name line (the sender will add it).";
   }
 
-  function buildStatementPrompt(p, cvText, name) {
+  function buildStatementPrompt(p, cvText, name, extra) {
+    const x = extra || {};
     return [
       "Write a personal statement for a PhD application, in the first person, for the applicant described by the CV below.",
       "",
@@ -325,10 +335,14 @@
       "- Write it in the applicant's own words, not as a rephrasing of the CV. Do not copy phrases of six or more words from the CV.",
       "- Plain, specific and honest. No flattery, no 'I am passionate', no clichés about curiosity since childhood, no placeholders in square brackets.",
       "- " + NO_INVENT,
+      x.story ? "- Their own written account of their life and work (below) is the record of what they have done. Draw on it in proportion: lead with what matters most for this programme, keep minor things to a clause, leave out what is irrelevant. Their weaknesses are real, so where one matters, say so plainly and what they are doing about it; never present a gap as a strength. Every number, duration and employer must match the account or CV." : "",
+      x.styleText ? "- Write the way they write: their sentence rhythm, openers, punctuation and spelling, in a register suited to a statement. Their style, measured from their own writing:\n" + x.styleText : "",
+      x.excerpts && x.excerpts.length ? "- Passages of their own writing, to show how they write. Copy neither their sentences nor their content:\n" + x.excerpts.map((e, i) => `(${i + 1}) ${e}`).join("\n") : "",
       "- " + signoff(name),
       "",
       "APPLICANT CV:",
       cvText,
+      x.story ? "\nTHE APPLICANT'S OWN ACCOUNT OF WHAT THEY HAVE DONE:\n" + x.story.slice(0, 40000) : "",
       p.proposal ? "\nTHE APPLICANT'S RESEARCH PROPOSAL (use its ideas, do not paste it):\n" + p.proposal.slice(0, 5000) : "",
       p.advert ? "\nTHE ADVERT:\n" + p.advert.slice(0, 5000) : "",
     ].filter((x) => x !== "").join("\n");
@@ -464,6 +478,9 @@
     if (p.advert) files.push({ path: dir + "/advert.md", content: p.advert + "\n" });
     if ((p.proposal || "").trim()) files.push({ path: dir + "/proposal.md", content: p.proposal + "\n" });
     if (p.tailoredProposal) files.push({ path: dir + "/proposal-tailored.md", content: p.tailoredProposal + "\n" });
+    if (p.proposalFull) files.push({ path: dir + "/proposal-full.md", content: p.proposalFull + "\n" });
+    const used = (p.sources || []).filter((x) => x.use);
+    if (used.length) files.push({ path: dir + "/sources.md", content: "# Sources found for this proposal\n\n" + used.map((x) => `- ${x.id}: ${x.authors.map((a) => a.family).join(", ")} (${x.year}) ${x.title}${x.doi ? " https://doi.org/" + x.doi : ""}${(p.readSources || {})[x.id] ? " [read]" : ""}`).join("\n") + "\n" });
     if (p.statement) files.push({ path: dir + "/personal-statement.md", content: p.statement + "\n" });
     const pl = plan(p, now);
     if (pl) files.push({ path: dir + "/plan.md", content: "# Plan, counting back from " + p.deadline + "\n\n" + pl.map((m) => `- [${m.done ? "x" : " "}] ${m.date}  ${m.label}`).join("\n") + "\n" });
@@ -519,6 +536,9 @@
         if (!out.createdAt) out.createdAt = new Date().toISOString();
         if (!validDate(out.deadline)) out.deadline = "";
         if (!Array.isArray(out.referees)) out.referees = ["", ""];
+        if (!Array.isArray(out.sources)) out.sources = [];
+        if (!Array.isArray(out.directions)) out.directions = [];
+        if (!out.readSources || typeof out.readSources !== "object") out.readSources = {};
         return out;
       });
   }
