@@ -21,6 +21,7 @@
   const SC = self.SponsorCheck;
   const A = self.Applications;
   const PH = self.Phd;
+  const PR = self.Proposal;
 
   const LS = {
     cv: "jr_cv_text",
@@ -28,6 +29,8 @@
     geminiKey: "jr_gemini_key",
     status: "jr_role_status",     // {uid: "applied"|"skipped"}
     apps: "jr_applications",      // [application records, see lib/applications.js]
+    style: "jr_style_samples",    // string: the applicant's own writing, to match their voice
+    oaKey: "jr_openalex_key",     // string: optional free OpenAlex key
     myName: "jr_my_name",         // string, used to sign emails and statements
     phd: "jr_phd",                // [PhD application records, see lib/phd.js]
   };
@@ -62,6 +65,7 @@
     statusByUid: lsGet(LS.status, {}),
     apps: lsGet(LS.apps, []),
     phd: self.Phd.normalizeAll(lsGet(LS.phd, [])),
+    styleText: lsGet(LS.style, ""),
     phFilter: "all", phSearch: "", openPhd: new Set(), busy: new Set(),
     tab: "roles",
     apFilter: "all", apSearch: "",
@@ -786,7 +790,10 @@
     const prompt = {
       email: () => PH.buildSupervisorEmailPrompt(p, state.cvText),
       review: () => PH.buildProposalReviewPrompt(p, state.cvText),
-      statement: () => PH.buildStatementPrompt(p, state.cvText, myName()),
+      statement: () => {
+        const st = myStyle();
+        return PH.buildStatementPrompt(p, state.cvText, myName(), st ? { story: state.styleText, styleText: PR.describeStyle(st), excerpts: PR.styleExcerpts(state.styleText, 3, 130) } : null);
+      },
       tailor: () => PH.buildTailorProposalPrompt(p, state.cvText),
     }[kind]();
     const text = await callGemini(prompt);
@@ -798,7 +805,9 @@
     } else if (kind === "statement") {
       p.statement = text;
       const q = PH.qualityCheckStatement(text, state.cvText, DC.sharedNgram);
-      note = q.ok ? `Personal statement drafted (${q.words} words).` : "Personal statement drafted, but check: " + q.problems.join(" ");
+      const nums = PR.numberCheck(text, [state.cvText, state.styleText, p.proposal, p.advert].join("\n"));
+      if (nums.length) q.problems.push(`These figures are not in your CV or your own account, so check them: ${nums.join(", ")}.`);
+      note = q.problems.length ? "Personal statement drafted, but check: " + q.problems.join(" ") : `Personal statement drafted (${q.words} words).`;
     } else if (kind === "tailor") {
       p.tailoredProposal = text;
       note = /^\s*NOTE:/i.test(text) ? "Proposal tailored. Read the NOTE on the first line: it says what does not fit this programme." : "Proposal tailored. Your original is untouched.";
@@ -954,6 +963,374 @@
     } })]));
   }
 
+
+  // ------------------------------------------- your writing + the proposal
+  let styleCache = { text: null, prof: null };
+  function styleProf() {
+    if (styleCache.text !== state.styleText) styleCache = { text: state.styleText, prof: PR.styleProfile(state.styleText) };
+    return styleCache.prof;
+  }
+  function myStyle() { const p = styleProf(); return p.words >= PR.MIN_STYLE_WORDS ? p : null; }
+
+  function renderStyleStats() {
+    const box = document.getElementById("ph-style-stats");
+    const pf = styleProf();
+    if (!state.styleText.trim()) { box.textContent = "Nothing saved yet."; return; }
+    if (pf.words < PR.MIN_STYLE_WORDS) { box.textContent = `${pf.words} words saved. Add at least ${PR.MIN_STYLE_WORDS - pf.words} more so there is enough to read a style from.`; return; }
+    box.textContent = `${pf.words} words saved. You write sentences of about ${pf.avgSentence} words (spread ${pf.sdSentence}), ${pf.spelling === "UK" ? "British" : pf.spelling === "US" ? "American" : "mixed or unclear"} spelling, and start most often with "${(pf.openers[0] || {}).word || "-"}".`;
+  }
+
+  async function fetchJson(url) {
+    let res;
+    try { res = await fetch(url); } catch (e) { const err = new Error("could not connect"); err.network = true; throw err; }
+    if (!res.ok) { const err = new Error("HTTP " + res.status); err.status = res.status; throw err; }
+    return res.json();
+  }
+  const OA_SELECT = "id,doi,title,display_name,publication_year,type,cited_by_count,authorships,primary_location,biblio,abstract_inverted_index";
+  function oaUrl(path, params) {
+    const q = Object.entries(params || {}).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+    const key = (lsGet(LS.oaKey, "") || "").trim();
+    if (key) q.push("api_key=" + encodeURIComponent(key));
+    return `https://api.openalex.org/${path}${q.length ? "?" + q.join("&") : ""}`;
+  }
+  const CR_SELECT = "DOI,title,author,issued,container-title,volume,issue,page,abstract,is-referenced-by-count,type";
+
+  async function searchLiterature(queries) {
+    const lists = []; let oaFailed = 0, crUsed = 0; let lastErr = null;
+    for (const q of queries) {
+      try {
+        const j = await fetchJson(oaUrl("works", { search: q, per_page: 10, filter: "from_publication_date:2012-01-01", select: OA_SELECT }));
+        lists.push((j.results || []).map(PR.fromOpenAlex).filter(Boolean));
+      } catch (e) {
+        oaFailed++; lastErr = e;
+        try {
+          const j = await fetchJson(`https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(q)}&rows=10&filter=from-pub-date:2012,type:journal-article&select=${CR_SELECT}`);
+          lists.push(((j.message && j.message.items) || []).map(PR.fromCrossref).filter(Boolean)); crUsed++;
+        } catch (e2) { lists.push([]); lastErr = e2; }
+      }
+    }
+    const merged = PR.mergeSources(lists, 16);
+    if (!merged.length) {
+      throw new Error("Could not get any papers from OpenAlex or Crossref. "
+        + (lastErr && lastErr.status === 429 || lastErr && lastErr.status === 403 ? "The free search allowance may be used up for today: a free OpenAlex key (in Your writing) raises it. " : lastErr && lastErr.network ? "This page could not connect: check your network or ad blocker. " : "")
+        + "You can still add papers one by one by DOI below.");
+    }
+    return { sources: merged, via: oaFailed === 0 ? "OpenAlex" : crUsed && oaFailed < queries.length ? "OpenAlex and Crossref" : "Crossref (OpenAlex did not answer)" };
+  }
+
+  async function lookupDoi(raw) {
+    const doi = PR.cleanDoi(raw);
+    if (!doi) throw new Error("That does not look like a DOI. A DOI starts with 10. followed by numbers, a slash and a code.");
+    try {
+      const j = await fetchJson(oaUrl("works/https://doi.org/" + doi, { select: OA_SELECT }));
+      const s = PR.fromOpenAlex(j); if (s) return s;
+    } catch (e) { /* fall through to Crossref */ }
+    try {
+      const j = await fetchJson("https://api.crossref.org/works/" + encodeURIComponent(doi));
+      const s = PR.fromCrossref(j.message); if (s) return s;
+    } catch (e) { /* fall through */ }
+    throw new Error("Could not find that DOI in OpenAlex or Crossref.");
+  }
+
+  function nextSourceId(p) { return "S" + (1 + Math.max(0, ...p.sources.map((x) => parseInt(String(x.id).slice(1), 10) || 0))); }
+  function addSources(p, list) {
+    let added = 0;
+    const keyOf = (x) => (x.doi ? x.doi.toLowerCase() : x.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
+    const have = new Set(p.sources.map(keyOf));
+    for (const s of list) {
+      const k = keyOf(s);
+      if (have.has(k)) continue;
+      have.add(k);
+      p.sources.push(Object.assign({}, s, { id: nextSourceId(p), abstract: (s.abstract || "").slice(0, 1500), use: (s.abstract || "").length >= 150 }));
+      added++;
+    }
+    return added;
+  }
+
+  async function findSources(p) {
+    const key = p.id + ":sources";
+    if (state.busy.has(key)) return;
+    state.busy.add(key); renderPhd();
+    try {
+      const prob = PR.briefProblem(p.brief, p.proposal);
+      if (prob) throw new Error(prob);
+      setPhMessage("Choosing search terms with Gemini…");
+      const queries = PR.parseQueries(await callGemini(PR.buildQueryPrompt(p, p.brief || p.proposal)));
+      setPhMessage(`Searching for papers: ${queries.join("; ")}…`);
+      const r = await searchLiterature(queries);
+      const added = addSources(p, r.sources);
+      p.updatedAt = new Date().toISOString(); savePhd();
+      setPhMessage(`Found ${r.sources.length} papers on ${r.via}; ${added} new. Papers with an abstract are ticked. Untick any you do not want, and add others by DOI.`);
+    } catch (e) { setPhMessage(e.message || String(e)); }
+    finally { state.busy.delete(key); state.openPhd.add(p.id); renderPhd(); }
+  }
+
+  async function addByDoi(p, raw) {
+    try {
+      setPhMessage("Looking that DOI up…");
+      const s = await lookupDoi(raw);
+      const n = addSources(p, [s]);
+      p.updatedAt = new Date().toISOString(); savePhd();
+      setPhMessage(n ? `Added: ${PR.authorYear(s).who} (${s.year}) ${s.title}` : "That paper is already in the list.");
+    } catch (e) { setPhMessage(e.message || String(e)); }
+    state.openPhd.add(p.id); renderPhd();
+  }
+
+  async function suggestDirections(p) {
+    const key = p.id + ":dir";
+    if (state.busy.has(key)) return;
+    state.busy.add(key); renderPhd();
+    try {
+      if (!myStyle()) throw new Error(`Load your own written account first (the "Your writing and background" box above, at least ${PR.MIN_STYLE_WORDS} words). The directions are drawn from what you have actually done, so they need it.`);
+      setPhMessage("Reading your account and this advert for research directions…");
+      const text = await callGemini(PR.buildDirectionsPrompt({ programme: p, story: state.styleText, cv: state.cvText, base: p.proposal }));
+      const dirs = PR.parseDirections(text, [state.styleText, state.cvText, p.proposal].join("\n"));
+      p.directions = dirs; p.updatedAt = new Date().toISOString(); savePhd();
+      const dropped = dirs.reduce((n, d) => n + d.unverified, 0);
+      setPhMessage(`${dirs.length} direction${dirs.length === 1 ? "" : "s"} suggested. Each quote shown is copied from your own text${dropped ? ` (${dropped} quote${dropped === 1 ? "" : "s"} the AI offered could not be found in your text and were removed)` : ""}. Pick one to build the proposal from.`);
+    } catch (e) { setPhMessage(e.message || String(e)); }
+    finally { state.busy.delete(key); state.openPhd.add(p.id); renderPhd(); }
+  }
+
+  function directionCards(p) {
+    const wrap = el("div", {});
+    p.directions.forEach((d, i) => {
+      const chosen = p.chosenDirection === d.title;
+      const card = el("div", { class: "dir" }, [
+        el("h5", { text: `${i + 1}. ${d.title}${chosen ? " (chosen)" : ""}` }),
+        el("div", { text: d.question, style: "font-weight:700;font-size:13px" }),
+        el("div", { class: "small", text: d.approach }),
+      ]);
+      if (d.fit) card.appendChild(el("div", { class: "small", text: "Fit: " + d.fit }));
+      if (d.quotes.length) {
+        card.appendChild(el("div", { class: "small", text: "Why you, in your own words (each quote checked against your text):" }));
+        for (const q of d.quotes) card.appendChild(el("blockquote", { text: q }));
+      }
+      if (d.weak) card.appendChild(el("div", { class: "weak", text: "None of the evidence the AI offered could be found in your text. Treat this as a bare suggestion, not something your background supports." }));
+      if (d.gaps.length) card.appendChild(el("div", { class: "small", text: "Still to learn or not yet done: " + d.gaps.join("; ") }));
+      card.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", text: chosen ? "Use again" : "Use this direction", onclick: () => {
+        if ((p.brief || "").trim() && p.chosenDirection !== d.title && !window.confirm("Replace the notes in Your ideas with this direction?")) return;
+        p.brief = PR.directionToBrief(d); p.chosenDirection = d.title; p.updatedAt = new Date().toISOString(); savePhd();
+        state.openPhd.add(p.id); setPhMessage("Direction chosen. Your ideas now holds it: edit it if you like, then Find sources."); renderPhd();
+      } })]));
+      wrap.appendChild(card);
+    });
+    return wrap;
+  }
+
+  function usedSources(p) { return p.sources.filter((x) => x.use).sort((a, b) => parseInt(a.id.slice(1), 10) - parseInt(b.id.slice(1), 10)); }
+  function targetFor(p) { return p.targetWords > 0 ? p.targetWords : PR.targetWords(p.advert); }
+
+  async function writeProposal(p) {
+    const key = p.id + ":write";
+    if (state.busy.has(key)) return;
+    state.busy.add(key); renderPhd();
+    try {
+      if (!state.cvText.trim()) throw new Error("Upload or paste your CV first (left panel).");
+      const prob = PR.briefProblem(p.brief, p.proposal);
+      if (prob) throw new Error(prob);
+      const style = myStyle();
+      if (!style) throw new Error(`Add your own writing first (the "Your writing" box above, at least ${PR.MIN_STYLE_WORDS} words). Without it the draft cannot be matched to your voice and would come out in a generic one.`);
+      const sources = usedSources(p);
+      const withText = sources.filter((x) => (x.abstract || "").length >= 150 || x.notes);
+      if (withText.length < 4) throw new Error("Tick at least 4 sources that have an abstract (or a passage you pasted from the paper). Everything in the proposal is written from those papers, and a paper with only a title gives nothing to write from. Find sources, or add papers by DOI.");
+      const target = targetFor(p);
+      const styleText = PR.describeStyle(style);
+      const excerpts = PR.styleExcerpts(state.styleText, 3, 130);
+
+      setPhMessage("Writing the proposal with Gemini (1 of up to 3 steps)…");
+      const facts = [state.styleText, state.cvText, p.brief, p.proposal, p.advert].join("\n");
+      let draft = await callGemini(PR.buildProposalPrompt({ programme: p, cv: state.cvText, brief: p.brief, base: p.proposal, sources, target, styleText, excerpts, story: state.styleText }));
+      let report = PR.checkDraft(draft, sources, style, target, facts);
+      let best = { draft, report }, passes = 0;
+      while (best.report.problems.length && passes < 2) {
+        passes++;
+        setPhMessage(`Checking found ${best.report.problems.length} thing${best.report.problems.length === 1 ? "" : "s"} to fix. Revising (step ${passes + 1} of up to 3)…`);
+        const revised = await callGemini(PR.buildRevisePrompt({ problems: best.report.problems, draft: best.draft, sources, styleText }));
+        const rr = PR.checkDraft(revised, sources, style, target, facts);
+        if (rr.score < best.report.score) best = { draft: revised, report: rr }; else break;
+      }
+      const f = PR.finalize(best.draft, sources, best.report);
+      p.proposalFull = f.text; p.proposalNote = f.note;
+      p.proposalReport = {
+        words: best.report.words, target, passes, at: new Date().toISOString(),
+        cited: best.report.cites.cited, remaining: best.report.problems, style: best.report.style.rows,
+      };
+      p.updatedAt = new Date().toISOString(); savePhd();
+      setPhMessage(best.report.problems.length
+        ? `Proposal written, but ${best.report.problems.length} problem${best.report.problems.length === 1 ? " is" : "s are"} still flagged below. Fix ${best.report.problems.length === 1 ? "it" : "them"} by hand.`
+        : "Proposal written and every check passed: the references exist, each factual sentence is cited or about you, and the wording matches you. The checks cannot tell whether a paper really says what it is cited for. Read each one.");
+    } catch (e) { setPhMessage(e.message || String(e)); }
+    finally { state.busy.delete(key); state.openPhd.add(p.id); renderPhd(); }
+  }
+
+  // The reference list marks journal titles with *asterisks*. This copies it as
+  // formatted text so they arrive italic in Word, and plain if the browser will not.
+  async function copyReferences(p) {
+    const refs = (p.proposalFull.split(/\n\nReferences\n\n/)[1] || "").split(/\n\n/).map((x) => x.trim()).filter(Boolean);
+    if (!refs.length) { setPhMessage("There is no reference list in the text."); return; }
+    try {
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([new window.ClipboardItem({
+          "text/html": new Blob([refs.map((r) => `<p>${PR.referenceHtml(r)}</p>`).join("")], { type: "text/html" }),
+          "text/plain": new Blob([refs.map((r) => r.replace(/\*/g, "")).join("\n\n")], { type: "text/plain" }),
+        })]);
+        setPhMessage(`Copied ${refs.length} references with journal titles in italics.`);
+      } else { copyText(refs.map((r) => r.replace(/\*/g, "")).join("\n\n")); setPhMessage("Copied the references as plain text: your browser cannot copy italics. Italicise the journal titles in Word."); }
+    } catch (e) { setPhMessage("Could not copy: " + (e.message || e)); }
+  }
+
+  function recheckWording(p) {
+    const r = PR.checkWording(p.proposalFull, myStyle(), targetFor(p), [state.styleText, state.cvText, p.brief, p.proposal, p.advert, ...p.sources.map((x) => `${x.abstract} ${x.title} ${x.notes || ""}`)].join("\n"));
+    p.proposalReport = Object.assign({}, p.proposalReport || {}, { words: r.words, target: targetFor(p), remaining: r.problems, style: r.style.rows });
+    savePhd();
+    setPhMessage(r.problems.length ? `${r.problems.length} wording problem${r.problems.length === 1 ? "" : "s"} found.` : "Wording checks pass.");
+    state.openPhd.add(p.id); renderPhd();
+  }
+
+  function proposalBuilder(p) {
+    const wrap = el("div", { class: "pack" }, [el("h4", { text: "Write a full proposal" })]);
+    wrap.appendChild(el("p", { class: "small", text: "Built from your own account, your CV, this advert, real papers found in OpenAlex, and the way you write. Everything about the field must come from the papers on the list below and carry a citation; sentences that do not are flagged. The reference list is made in Harvard style from the paper records, not typed by the AI." }));
+
+    const dirBusy = state.busy.has(p.id + ":dir");
+    const dirBtn = el("button", { class: "btn", text: dirBusy ? "Reading your account…" : (p.directions.length ? "Suggest directions again" : "Suggest research directions"), onclick: () => suggestDirections(p) });
+    if (dirBusy) dirBtn.setAttribute("disabled", "");
+    wrap.appendChild(el("div", { class: "row" }, [dirBtn]));
+    wrap.appendChild(el("div", { class: "note", text: "Drawn from your own account of what you have done, weighed against this advert. You choose; nothing is invented about you, and every quote is checked against your text." }));
+    if (p.directions.length) wrap.appendChild(directionCards(p));
+
+    const brief = el("textarea", { "aria-label": "Your notes for the proposal", placeholder: "In your own words: what you want to investigate, what you have done that supports it, the method you have in mind, and anything you do not want included. Rough notes are fine, the more specific the better." });
+    brief.value = p.brief || "";
+    brief.addEventListener("change", () => { p.brief = brief.value; p.updatedAt = new Date().toISOString(); savePhd(); });
+    wrap.appendChild(el("div", {}, [el("label", { text: "Your ideas (filled in when you choose a direction, or write your own)" }), brief]));
+
+    const tgt = el("input", { type: "number", min: "300", max: "6000", step: "50", "aria-label": "Target length in words", style: "width:110px" });
+    tgt.value = String(targetFor(p));
+    tgt.addEventListener("change", () => { p.targetWords = Math.max(300, Math.min(6000, parseInt(tgt.value, 10) || 0)); savePhd(); renderPhd(); });
+    wrap.appendChild(el("div", {}, [el("label", { text: "Length in words (read from the advert if it says; otherwise 1500)" }), tgt]));
+
+    const finding = state.busy.has(p.id + ":sources");
+    const findBtn = el("button", { class: "btn", text: finding ? "Searching…" : (p.sources.length ? "Find more sources" : "Find sources"), onclick: () => findSources(p) });
+    if (finding) findBtn.setAttribute("disabled", "");
+    const doi = el("input", { type: "text", placeholder: "add a paper by DOI, e.g. 10.1109/…", "aria-label": "Add a paper by DOI", style: "max-width:260px" });
+    wrap.appendChild(el("div", { class: "row" }, [findBtn, doi, el("button", { class: "btn", text: "Add DOI", onclick: () => addByDoi(p, doi.value) })]));
+
+    if (p.sources.length) {
+      const ul = el("ul", { class: "src-list" });
+      for (const s of p.sources) {
+        const cb = el("input", { type: "checkbox", id: `src-${p.id}-${s.id}`, "aria-label": `Use ${s.title}` });
+        cb.checked = !!s.use;
+        cb.addEventListener("change", () => { s.use = cb.checked; savePhd(); state.openPhd.add(p.id); renderPhd(); });
+        const a = PR.authorYear(s);
+        ul.appendChild(el("li", {}, [
+          cb,
+          el("div", {}, [
+            el("label", { for: cb.id, style: "margin:0;color:var(--carbon);font-size:12.5px" }, [
+              document.createTextNode(`${s.id}: ${a.who} (${s.year}) ${s.title}${s.venue ? ", " + s.venue : ""}`),
+              s.abstract && s.abstract.length >= 150 ? document.createTextNode("") : el("span", { class: "tag", text: s.notes ? "your passage" : "no abstract" }),
+            ]),
+            (() => {
+              const d = el("details", {}, [el("summary", { class: "small", text: s.notes ? "Passages you copied from this paper" : "Add a passage from the full paper" })]);
+              const ta = el("textarea", { "aria-label": `Passages from ${s.title}`, placeholder: "Paste sentences from the paper that matter for your proposal. The proposal may then draw on them as well as the abstract." });
+              ta.value = s.notes || "";
+              ta.addEventListener("change", () => { s.notes = ta.value.slice(0, 3000); savePhd(); state.openPhd.add(p.id); renderPhd(); });
+              d.appendChild(ta); return d;
+            })(),
+          ]),
+          el("span", {}, [
+            s.doi ? el("a", { href: "https://doi.org/" + s.doi, target: "_blank", rel: "noopener", text: "open" }) : document.createTextNode(""),
+            document.createTextNode(" "),
+            el("button", { class: "btn", style: "padding:0 6px", "aria-label": `Remove ${s.title}`, text: "×", onclick: () => { p.sources = p.sources.filter((x) => x !== s); savePhd(); state.openPhd.add(p.id); renderPhd(); } }),
+          ]),
+        ]));
+      }
+      wrap.appendChild(ul);
+      wrap.appendChild(el("div", { class: "small", text: `${usedSources(p).length} of ${p.sources.length} ticked. The proposal is written only from the ticked papers' abstracts and any passages you paste, so tick the ones you will really read. Papers with no abstract are not ticked by default.` }));
+    }
+
+    const writing = state.busy.has(p.id + ":write");
+    const wbtn = el("button", { class: "btn", text: writing ? "Writing…" : (p.proposalFull ? "Write it again" : "Write the proposal"), onclick: () => writeProposal(p) });
+    if (writing) wbtn.setAttribute("disabled", "");
+    wrap.appendChild(el("div", { class: "row" }, [wbtn]));
+
+    if (p.proposalFull) {
+      if (p.proposalNote) wrap.appendChild(el("div", { class: "quality-warn", text: p.proposalNote }));
+      const ta = el("textarea", { "aria-label": "Full research proposal", style: "min-height:380px" });
+      ta.value = p.proposalFull;
+      ta.addEventListener("change", () => { p.proposalFull = ta.value; p.updatedAt = new Date().toISOString(); savePhd(); });
+      wrap.appendChild(ta);
+      wrap.appendChild(el("div", { class: "row" }, [
+        el("button", { class: "btn", text: "Copy", onclick: () => copyText(p.proposalFull) }),
+        el("button", { class: "btn", text: "Download .md", onclick: () => downloadText(p.proposalFull, `research-proposal-${PH.slug(p.university)}.md`) }),
+        el("button", { class: "btn", text: "Copy references with italics", onclick: () => copyReferences(p) }),
+        el("button", { class: "btn", text: "Re-check wording after my edits", onclick: () => recheckWording(p) }),
+      ]));
+      wrap.appendChild(proposalReport(p));
+    }
+    return wrap;
+  }
+
+  function proposalReport(p) {
+    const r = p.proposalReport;
+    const box = el("div", { class: "report" });
+    if (!r) return box;
+    box.appendChild(el("h4", { text: "What the checks found" }));
+    box.appendChild(el("p", { class: "small", text: `${r.words} words (target ${r.target}). ${r.passes ? `Revised ${r.passes} time${r.passes === 1 ? "" : "s"} to fix checker findings.` : ""}` }));
+    if (r.remaining && r.remaining.length) {
+      box.appendChild(el("p", { text: "Still flagged:", style: "margin:4px 0;font-weight:700" }));
+      box.appendChild(el("ul", { class: "warn-list" }, r.remaining.map((x) => el("li", { text: x }))));
+    } else box.appendChild(el("p", { class: "small", text: "No stock phrases, unlisted citations or voice mismatches found." }));
+    if (r.style && r.style.length) {
+      const t = el("table", { class: "cmp" }, [el("tr", {}, ["How it reads", "You", "This draft", ""].map((x) => el("th", { text: x })))]);
+      for (const row of r.style) t.appendChild(el("tr", {}, [row.label, String(row.yours), String(row.draft), row.flag ? "differs" : ""].map((x, i) => el("td", { text: x, class: i === 3 && x ? "flag" : "" }))));
+      box.appendChild(t);
+    }
+    const cited = (r.cited || []).map((id) => p.sources.find((x) => x.id === id)).filter(Boolean);
+    if (cited.length) {
+      const read = cited.filter((s) => p.readSources[s.id]).length;
+      box.appendChild(el("h4", { text: `Sources cited: ${read} of ${cited.length} marked read`, style: "margin-top:10px" }));
+      box.appendChild(el("p", { class: "small", text: "The references are real records. Whether each paper supports the sentence it is cited for is for you to check: open it, read it, then tick it. You will be asked about these at interview." }));
+      const ul = el("ul", { class: "src-list" });
+      for (const s of cited) {
+        const cb = el("input", { type: "checkbox", id: `read-${p.id}-${s.id}`, "aria-label": `I have read ${s.title}` });
+        cb.checked = !!p.readSources[s.id];
+        cb.addEventListener("change", () => { p.readSources[s.id] = cb.checked; savePhd(); state.openPhd.add(p.id); renderPhd(); });
+        const gaps = PR.referenceGaps(s);
+        ul.appendChild(el("li", {}, [cb, el("div", {}, [el("label", { for: cb.id, style: "margin:0;color:var(--carbon);font-size:12.5px", text: PR.referenceLine(s).replace(/\*/g, "") }),
+          gaps.length ? el("div", { class: "weak", style: "font-size:12px;color:var(--caution)", text: "Complete by hand in the reference list: " + gaps.join(", ") + "." }) : document.createTextNode("")]),
+          s.doi ? el("a", { href: "https://doi.org/" + s.doi, target: "_blank", rel: "noopener", text: "open" }) : document.createTextNode("")]));
+      }
+      box.appendChild(ul);
+    }
+    return box;
+  }
+
+  function wireStyle() {
+    const box = document.getElementById("ph-style-text");
+    box.value = state.styleText;
+    const okey = document.getElementById("ph-oakey");
+    okey.value = lsGet(LS.oaKey, "") || "";
+    okey.addEventListener("change", () => { lsSet(LS.oaKey, okey.value.trim()); });
+    renderStyleStats();
+    document.getElementById("ph-style-save").addEventListener("click", () => {
+      state.styleText = box.value; lsSet(LS.style, state.styleText); renderStyleStats(); renderPhd();
+    });
+    document.getElementById("ph-style-clear").addEventListener("click", () => {
+      box.value = ""; state.styleText = ""; lsSet(LS.style, ""); renderStyleStats(); renderPhd();
+    });
+    document.getElementById("ph-style-file").addEventListener("change", async (e) => {
+      const files = [...e.target.files]; e.target.value = "";
+      try {
+        for (const f of files) {
+          const t = await fileToText(f);
+          if (!t.trim()) throw new Error(`No text could be read from ${f.name} (a scanned PDF has none).`);
+          box.value = (box.value.trim() ? box.value.trim() + "\n\n" : "") + t.trim();
+        }
+        state.styleText = box.value; lsSet(LS.style, state.styleText); renderStyleStats(); renderPhd();
+      } catch (err) { document.getElementById("ph-style-stats").textContent = err.message || String(err); }
+    });
+  }
+
   function renderPhdRow(p) {
     const d = el("details", { class: "app" });
     d.dataset.id = p.id;
@@ -1069,6 +1446,7 @@
     body.appendChild(proposal);
 
     body.appendChild(textBlock(p, "Proposal tailored to this programme", "tailoredProposal", "tailor"));
+    body.appendChild(proposalBuilder(p));
     body.appendChild(textBlock(p, "Personal statement", "statement", "statement"));
 
     const mail = el("div", {}, [el("h4", { text: "Email to the supervisor" })]);
@@ -1168,6 +1546,7 @@
       document.getElementById("ph-advert-text").value = "";
       const o = document.getElementById("ph-advert-result"); o.hidden = true; o.innerHTML = "";
     });
+    wireStyle();
     const nameBox = document.getElementById("ph-myname");
     nameBox.value = myName();
     nameBox.addEventListener("change", () => { lsSet(LS.myName, nameBox.value.trim()); renderPhd(); });
@@ -1296,6 +1675,11 @@
   });
 
   document.addEventListener("DOMContentLoaded", () => {
+    // A file left out of an update would otherwise break the whole page with a
+    // cryptic error. Say which one is missing instead.
+    const files = { Applications: "lib/applications.js", Zip: "lib/zip.js", Phd: "lib/phd.js", Proposal: "lib/proposal.js" };
+    const missing = Object.keys(files).filter((k) => !self[k]).map((k) => "web/" + files[k]);
+    if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
     loadData();
   });
