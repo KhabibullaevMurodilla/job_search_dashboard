@@ -238,6 +238,20 @@
   .found-list li { padding: 2px 0; }
   .warn-list { margin: 6px 0; padding-left: 18px; font-size: 13px; color: var(--caution); }
   .pack { border: 1px solid var(--carbon); padding: 12px 14px; }
+  .src-list { list-style: none; margin: 8px 0; padding: 0; font-size: 12.5px; }
+  .src-list li { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+  .src-list input { width: auto; margin: 0; }
+  .src-list details { margin-top: 4px; }
+  .src-list textarea { min-height: 70px; font-size: 12px; }
+  .dir { border: 1px solid var(--carbon); padding: 10px 12px; margin: 8px 0; max-width: 760px; }
+  .dir h5 { margin: 0 0 4px; font-size: 13px; }
+  .dir blockquote { margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--carbon); font-size: 12.5px; }
+  .dir .weak { color: var(--caution); font-size: 12px; }
+  .src-list .tag { font-size: 11px; border: 1px solid currentColor; padding: 0 5px; color: var(--muted); margin-left: 6px; }
+  .cmp { border-collapse: collapse; font-size: 12.5px; margin: 6px 0; width: 100%; max-width: 640px; }
+  .cmp th, .cmp td { border-bottom: 1px solid var(--rule); padding: 3px 8px 3px 0; text-align: left; }
+  .cmp .flag { color: var(--caution); font-weight: 700; }
+  .report { border-left: 3px solid var(--carbon); padding: 4px 0 4px 12px; margin: 8px 0; }
   .pack h4 { margin-top: 0; }
   details.add > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 </style>
@@ -335,6 +349,19 @@
         <input type="file" id="ph-import" accept=".json" hidden>
         <input type="text" id="ph-myname" placeholder="your name, for emails" aria-label="Your name, used to sign emails and statements">
       </div>
+      <details class="add" id="ph-style-box">
+        <summary>Your writing and background</summary>
+        <p class="small" style="max-width:62ch">Load your own written account of your life and work: your Canonical interview, an essay, a long personal statement. At least 400 words, more is better. It is used two ways. First, the page measures how you write (sentence length, how you start sentences, punctuation, spelling) and checks every draft against it. Second, it is the record of what you have done, so research directions and proposals are built from your real experience, strengths and weaknesses. It stays in this browser. When you ask for a draft, the text goes to Gemini with your own key.</p>
+        <textarea id="ph-style-text" aria-label="Samples of your own writing" placeholder="Paste your own writing here."></textarea>
+        <div class="row">
+          <input type="file" id="ph-style-file" accept=".txt,.md,.pdf" multiple aria-label="Add writing from files">
+          <button class="btn" id="ph-style-save">Save</button>
+          <button class="btn" id="ph-style-clear">Clear</button>
+        </div>
+        <div id="ph-style-stats" class="small" role="status"></div>
+        <label for="ph-oakey">OpenAlex key (optional, free)</label>
+        <input type="text" id="ph-oakey" placeholder="only needed if the free daily search allowance runs out">
+      </details>
       <details class="add" id="ph-advert-box" open>
         <summary>Start from an advert</summary>
         <p class="small" style="max-width:62ch">Paste a PhD advert. You get a CV match and a list of what the advert does and does not say straight away. With your Gemini key it also reads out the university, theme, supervisor, funding and deadline, so you can add the programme in one click and then prepare its whole application pack.</p>
@@ -408,6 +435,7 @@
 <script src="./lib/applications.js"></script>
 <script src="./lib/zip.js"></script>
 <script src="./lib/phd.js"></script>
+<script src="./lib/proposal.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
