@@ -45,7 +45,7 @@
 
     for (const f of files) {
       const name = enc.encode(f.path);
-      const data = enc.encode(f.content);
+      const data = f.content instanceof Uint8Array ? f.content : enc.encode(f.content);
       const crc = crc32(data);
 
       const lh = new DataView(new ArrayBuffer(30));
