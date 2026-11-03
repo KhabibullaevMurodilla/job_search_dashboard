@@ -241,6 +241,10 @@
   .src-list { list-style: none; margin: 8px 0; padding: 0; font-size: 12.5px; }
   .src-list li { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--rule); }
   .src-list input { width: auto; margin: 0; }
+  .doc-list { list-style: none; padding: 0; margin: 8px 0; max-width: 760px; }
+  .doc-list li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--carbon); font-size: 12.5px; flex-wrap: wrap; }
+  .doc-list .nm { flex: 1; min-width: 160px; word-break: break-word; }
+  .doc-list .btn { padding: 2px 8px; }
   .src-list details { margin-top: 4px; }
   .src-list textarea { min-height: 70px; font-size: 12px; }
   .dir { border: 1px solid var(--carbon); padding: 10px 12px; margin: 8px 0; max-width: 760px; }
@@ -266,6 +270,7 @@
   <button role="tab" id="tab-score" data-tab="score" aria-selected="false">Score a posting</button>
   <button role="tab" id="tab-apps" data-tab="apps" aria-selected="false">My applications</button>
   <button role="tab" id="tab-phd" data-tab="phd" aria-selected="false">PhD applications</button>
+  <button role="tab" id="tab-docs" data-tab="docs" aria-selected="false">Merge &amp; split PDFs</button>
 </div>
 <div class="layout">
   <aside>
@@ -392,6 +397,39 @@
       <div id="ph-list"></div>
     </section>
 
+    <section id="view-docs" role="tabpanel" aria-labelledby="tab-docs" hidden>
+      <p class="small" style="max-width:70ch">Portals often want one combined PDF, a file under a size limit, or the CV and certificates as separate files. Both tools run in this browser: your documents are not uploaded anywhere, and they are not kept after you close or refresh the page.</p>
+      <div id="dc-missing" class="note" hidden></div>
+      <div class="pack" id="dc-merge">
+        <h4>Merge into one PDF</h4>
+        <p class="small">Add PDFs, JPGs or PNGs in any order (a photographed certificate becomes one page). Put them in the order the portal asks for, then merge.</p>
+        <input type="file" id="dc-merge-files" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" multiple aria-label="Files to merge">
+        <ol id="dc-merge-list" class="doc-list"></ol>
+        <div class="row">
+          <input type="text" id="dc-merge-name" value="application-pack" aria-label="Name of the merged file" style="width:220px">
+          <input type="number" id="dc-merge-limit" min="0" step="0.5" placeholder="size limit, MB" aria-label="Portal size limit in MB" style="width:140px">
+          <button class="btn" id="dc-merge-go">Merge and download</button>
+          <button class="btn" id="dc-merge-clear">Clear list</button>
+        </div>
+        <div class="note" id="dc-merge-msg" role="status"></div>
+      </div>
+      <div class="pack" id="dc-split">
+        <h4>Split or pick pages from a PDF</h4>
+        <p class="small">Pull out the pages a portal asks for (for example just the transcript from a long scan), or cut one file into several.</p>
+        <input type="file" id="dc-split-file" accept=".pdf,application/pdf" aria-label="PDF to split">
+        <div class="small" id="dc-split-info"></div>
+        <div class="row">
+          <input type="text" id="dc-split-ranges" placeholder="pages, e.g. 1-3, 5, 8-" aria-label="Pages to take" style="width:220px">
+          <select id="dc-split-mode" aria-label="How to save the pages">
+            <option value="one">All of them in one new PDF</option>
+            <option value="each">Each range as its own PDF (zip)</option>
+          </select>
+          <button class="btn" id="dc-split-go">Create and download</button>
+        </div>
+        <div class="note" id="dc-split-msg" role="status"></div>
+      </div>
+    </section>
+
     <section id="view-apps" role="tabpanel" aria-labelledby="tab-apps" hidden>
       <div class="toolbar">
         <input type="text" id="ap-search" placeholder="search saved roles" aria-label="Search applications">
@@ -434,6 +472,8 @@
 <script src="./lib/dashboard-core.js"></script>
 <script src="./lib/applications.js"></script>
 <script src="./lib/zip.js"></script>
+<script src="./lib/pdf-lib.min.js"></script>
+<script src="./lib/pdftools.js"></script>
 <script src="./lib/phd.js"></script>
 <script src="./lib/proposal.js"></script>
 <script src="./app.js"></script>
