@@ -420,12 +420,13 @@
     for (const b of document.querySelectorAll("#tabs [data-tab]")) {
       b.setAttribute("aria-selected", b.dataset.tab === name ? "true" : "false");
     }
-    for (const t of ["roles", "score", "apps", "phd"]) {
+    for (const t of ["roles", "score", "apps", "phd", "docs"]) {
       document.getElementById("view-" + t).hidden = t !== name;
     }
     document.getElementById("panel-filters").hidden = name !== "roles";
     if (name === "apps") renderApps();
     if (name === "phd") renderPhd();
+    if (name === "docs") renderDocs();
   }
 
   // ------------------------------------------------- score a posting
@@ -1674,6 +1675,110 @@
     if (state.tab === "phd") renderPhd();
   });
 
+  // ------------------------------------------------ merge and split PDFs
+  // Held in memory only: documents are personal and large, so they are never
+  // written to browser storage.
+  const docs = { merge: [], split: null };
+  const dq = (id) => document.getElementById(id);
+  const toolsReady = () => !!(self.PDFLib && self.PdfTools);
+
+  function docMsg(id, text) { dq(id).textContent = text; }
+
+  function renderDocs() {
+    const miss = dq("dc-missing");
+    miss.hidden = toolsReady();
+    if (!toolsReady()) miss.textContent = "This tool needs web/lib/pdf-lib.min.js and web/lib/pdftools.js. Add them next to the other files in web/lib/, push, and refresh.";
+    const ul = dq("dc-merge-list"); ul.textContent = "";
+    docs.merge.forEach((f, i) => {
+      const move = (d) => () => { const j = i + d; if (j < 0 || j >= docs.merge.length) return; [docs.merge[i], docs.merge[j]] = [docs.merge[j], docs.merge[i]]; renderDocs(); };
+      ul.appendChild(el("li", {}, [
+        el("span", { class: "nm", text: `${i + 1}. ${f.name}` }),
+        el("span", { class: "small", text: `${self.PdfTools ? self.PdfTools.sizeLabel(f.bytes.length) : ""}${f.pages ? ` · ${f.pages} page${f.pages === 1 ? "" : "s"}` : " · image"}` }),
+        el("button", { class: "btn", text: "Up", "aria-label": `Move ${f.name} up`, onclick: move(-1) }),
+        el("button", { class: "btn", text: "Down", "aria-label": `Move ${f.name} down`, onclick: move(1) }),
+        el("button", { class: "btn", text: "Remove", "aria-label": `Remove ${f.name}`, onclick: () => { docs.merge.splice(i, 1); renderDocs(); } }),
+      ]));
+    });
+    if (docs.merge.length) {
+      const total = docs.merge.reduce((n, f) => n + f.bytes.length, 0);
+      ul.appendChild(el("li", {}, [el("span", { class: "small", text: `${docs.merge.length} file${docs.merge.length === 1 ? "" : "s"}, ${self.PdfTools.sizeLabel(total)} before merging.` })]));
+    }
+    dq("dc-split-info").textContent = docs.split ? `${docs.split.name}: ${docs.split.pages} page${docs.split.pages === 1 ? "" : "s"}, ${self.PdfTools.sizeLabel(docs.split.bytes.length)}.` : "";
+  }
+
+  async function readFile(file) { return new Uint8Array(await file.arrayBuffer()); }
+
+  async function addMergeFiles(fileList) {
+    if (!toolsReady()) { renderDocs(); return; }
+    const T = self.PdfTools; const problems = []; let added = 0;
+    for (const file of fileList) {
+      if (!T.isPdf(file.name, file.type) && !T.isImage(file.name, file.type)) { problems.push(`"${file.name}" is not a PDF, JPG or PNG. Convert it to PDF first (in Word: File, Save as PDF).`); continue; }
+      try {
+        const bytes = await readFile(file);
+        const pages = T.isPdf(file.name, file.type) ? await T.pageCount(self.PDFLib, bytes, file.name) : 0;
+        docs.merge.push({ name: file.name, type: file.type, bytes, pages }); added++;
+      } catch (e) { problems.push(e.message || String(e)); }
+    }
+    renderDocs();
+    docMsg("dc-merge-msg", [added ? `Added ${added} file${added === 1 ? "" : "s"}.` : "", ...problems].filter(Boolean).join(" "));
+  }
+
+  async function mergeNow() {
+    if (!toolsReady()) { renderDocs(); return; }
+    const T = self.PdfTools;
+    try {
+      docMsg("dc-merge-msg", "Merging…");
+      const out = await T.merge(self.PDFLib, docs.merge);
+      const name = (T.stem(dq("dc-merge-name").value) || "application-pack") + ".pdf";
+      downloadBlob(new Blob([out], { type: "application/pdf" }), name);
+      const pages = (await self.PDFLib.PDFDocument.load(out)).getPageCount();
+      docMsg("dc-merge-msg", `Downloaded ${name}: ${pages} page${pages === 1 ? "" : "s"}, ${T.sizeLabel(out.length)}. ${T.limitAdvice(out.length, dq("dc-merge-limit").value)} Open it once and check the order before you upload.`.replace(/\s+/g, " "));
+    } catch (e) { docMsg("dc-merge-msg", e.message || String(e)); }
+  }
+
+  async function loadSplit(file) {
+    if (!file) return;
+    if (!toolsReady()) { renderDocs(); return; }
+    try {
+      const bytes = await readFile(file);
+      const pages = await self.PdfTools.pageCount(self.PDFLib, bytes, file.name);
+      docs.split = { name: file.name, bytes, pages };
+      docMsg("dc-split-msg", "");
+    } catch (e) { docs.split = null; docMsg("dc-split-msg", e.message || String(e)); }
+    renderDocs();
+  }
+
+  async function splitNow() {
+    if (!toolsReady()) { renderDocs(); return; }
+    const T = self.PdfTools;
+    if (!docs.split) { docMsg("dc-split-msg", "Choose a PDF first."); return; }
+    const r = T.parseRanges(dq("dc-split-ranges").value, docs.split.pages);
+    if (r.error) { docMsg("dc-split-msg", r.error); return; }
+    try {
+      const mode = dq("dc-split-mode").value;
+      const names = T.splitNames(docs.split.name, r.ranges, mode);
+      if (mode === "one") {
+        const out = await T.extract(self.PDFLib, docs.split.bytes, T.pagesOf(r.ranges), docs.split.name);
+        downloadBlob(new Blob([out], { type: "application/pdf" }), names[0]);
+        docMsg("dc-split-msg", `Downloaded ${names[0]}: ${T.pagesOf(r.ranges).length} page${T.pagesOf(r.ranges).length === 1 ? "" : "s"}, ${T.sizeLabel(out.length)}.`);
+      } else {
+        const files = [];
+        for (let i = 0; i < r.ranges.length; i++) files.push({ path: names[i], content: await T.extract(self.PDFLib, docs.split.bytes, T.pagesOf([r.ranges[i]]), docs.split.name) });
+        if (files.length === 1) { downloadBlob(new Blob([files[0].content], { type: "application/pdf" }), files[0].path); }
+        else downloadBlob(new Blob([self.Zip.build(files)], { type: "application/zip" }), T.stem(docs.split.name) + "-split.zip");
+        docMsg("dc-split-msg", `Downloaded ${files.length} PDF${files.length === 1 ? "" : "s"}${files.length > 1 ? " in a zip" : ""}: ${names.join(", ")}.`);
+      }
+    } catch (e) { docMsg("dc-split-msg", e.message || String(e)); }
+  }
+
+  function wireDocs() {
+    dq("dc-merge-files").addEventListener("change", async (e) => { const l = [...e.target.files]; e.target.value = ""; await addMergeFiles(l); });
+    dq("dc-merge-go").addEventListener("click", mergeNow);
+    dq("dc-merge-clear").addEventListener("click", () => { docs.merge = []; docMsg("dc-merge-msg", ""); renderDocs(); });
+    dq("dc-split-file").addEventListener("change", (e) => loadSplit(e.target.files[0]));
+    dq("dc-split-go").addEventListener("click", splitNow);
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     // A file left out of an update would otherwise break the whole page with a
     // cryptic error. Say which one is missing instead.
@@ -1681,6 +1786,7 @@
     const missing = Object.keys(files).filter((k) => !self[k]).map((k) => "web/" + files[k]);
     if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
+    wireDocs();
     loadData();
   });
 })();
