@@ -22,6 +22,7 @@
   const A = self.Applications;
   const PH = self.Phd;
   const PR = self.Proposal;
+  const AN = self.Answers;
 
   const LS = {
     cv: "jr_cv_text",
@@ -196,9 +197,35 @@
       throw new Error("This role has no description to write a letter against. "
         + "Paste the posting text into it first.");
     }
-    const prompt = DC.buildCoverLetterPrompt(app, state.cvText);
+    // The applicant's own written account (Your writing and background) is a
+    // second source of facts for the letter, alongside the CV.
+    const story = (state.styleText || "").trim();
+    const hasStory = story.split(/\s+/).length >= 150;
+    let prompt = DC.buildCoverLetterPrompt(app, state.cvText);
+    if (hasStory) {
+      prompt += `
+
+--- the candidate's own written account of their background ---
+${story.slice(0, 40000)}
+
+ABOUT THAT ACCOUNT. It is a second record of what the candidate has done, in
+their own words. Use it to choose which parts of the candidate's history matter
+most for THIS role and to give the letter their real motivation and way of
+working. Weight things in proportion: lead with what this role needs, give minor
+things a clause, leave out the rest. Facts and numbers may come from the CV or
+this account and from nowhere else. Where the account shows a gap against the
+posting, do not hide it or invent a fix: either leave it unmentioned or name it
+briefly with what the candidate does about it. No six-word sequence may be
+copied from the account either. Write in a professional register.`;
+    }
     const draft = await callGemini(prompt);
     const q = DC.qualityCheckCoverLetter(draft, state.cvText);
+    if (hasStory) {
+      const copied = DC.sharedNgram(draft, story, 6);
+      if (copied) { q.problems.push(`shares "${copied}" with your written account word-for-word`); q.ok = false; }
+      const nums = PR.numberCheck(draft, state.cvText + "\n" + story + "\n" + (app.description || ""));
+      if (nums.length) { q.problems.push(`these figures are not in your CV or your account, so check them: ${nums.join(", ")}`); q.ok = false; }
+    }
     app.coverLetter = draft;
     app.updatedAt = new Date().toISOString();
     saveApps();
@@ -668,7 +695,54 @@
     return d;
   }
 
+  // ---------------------------------------------------------------- application questions
+  function aqFill() {
+    const sel = document.getElementById("aq-role");
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = "";
+    sel.appendChild(el("option", { value: "", text: "Not saved: I will paste the posting" }));
+    for (const a of state.apps) sel.appendChild(el("option", { value: a.id, text: `${a.title} at ${a.company}` }));
+    if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    document.getElementById("aq-free").hidden = !!sel.value;
+  }
+
+  async function aqWrite() {
+    const msg = document.getElementById("aq-msg"), out = document.getElementById("aq-out");
+    const sel = document.getElementById("aq-role");
+    const question = document.getElementById("aq-question").value.trim();
+    out.textContent = "";
+    try {
+      if (!AN) throw new Error("This tool needs web/lib/answers.js. Add it next to the other files in web/lib/, push, and refresh.");
+      if (!state.cvText.trim()) throw new Error("Upload or paste your CV first (left panel). The answer is written from it.");
+      if (!question) throw new Error("Paste the question first.");
+      const app = state.apps.find((a) => a.id === sel.value) || null;
+      const posting = app ? (app.description || "") : document.getElementById("aq-posting").value.trim();
+      const story = (state.styleText || "").trim().split(/\s+/).length >= 150 ? state.styleText.trim() : "";
+      const st = myStyle();
+      const o = {
+        question, limit: parseInt(document.getElementById("aq-limit").value, 10) || 0,
+        title: app ? app.title : "", company: app ? app.company : document.getElementById("aq-company").value.trim(),
+        posting, cv: state.cvText, story, styleText: st ? PR.describeStyle(st) : "",
+      };
+      msg.textContent = "Writing from your CV" + (story ? " and your background" : "") + "…";
+      const raw = await callGemini(AN.buildAnswerPrompt(o));
+      const { answer, note } = AN.splitNote(raw);
+      const q = AN.checkAnswer(answer, o);
+      msg.textContent = q.ok ? `Done: ${q.words} words (limit ${q.limit}). Read it once, and change anything that is not how you would say it.` : `Written (${q.words} words, limit ${q.limit}), but check: ${q.problems.join("; ")}.`;
+      out.appendChild(el("pre", { class: "draft-text", text: answer }));
+      if (note) out.appendChild(el("div", { class: "quality-warn", text: "Add to your background: " + note }));
+      if (!story) out.appendChild(el("div", { class: "small", text: "No written background is loaded, so this used your CV only. Load it in the PhD tab, under Your writing and background, for richer answers." }));
+      const row = el("div", { class: "row" }, [el("button", { class: "btn", text: "Copy", onclick: () => { copyText(answer); msg.textContent = "Copied."; } })]);
+      if (app) row.appendChild(el("button", { class: "btn", text: "Save to this role's notes", onclick: () => {
+        app.notes = (app.notes ? app.notes + "\n\n" : "") + `Q: ${question}\nA: ${answer}`; app.updatedAt = new Date().toISOString(); saveApps(); msg.textContent = "Saved to the role's notes.";
+      } }));
+      out.appendChild(row);
+    } catch (e) { msg.textContent = e.message || String(e); }
+  }
+
   function renderApps() {
+    aqFill();
     renderAppDashboard();
     const list = document.getElementById("ap-list");
     list.innerHTML = "";
@@ -987,7 +1061,7 @@
     if (!res.ok) { const err = new Error("HTTP " + res.status); err.status = res.status; throw err; }
     return res.json();
   }
-  const OA_SELECT = "id,doi,title,display_name,publication_year,type,cited_by_count,authorships,primary_location,biblio,abstract_inverted_index";
+  const OA_SELECT = "id,doi,title,display_name,publication_year,type,cited_by_count,authorships,primary_location,biblio,abstract_inverted_index,best_oa_location,open_access";
   function oaUrl(path, params) {
     const q = Object.entries(params || {}).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
     const key = (lsGet(LS.oaKey, "") || "").trim();
@@ -1119,6 +1193,36 @@
     return wrap;
   }
 
+  // Full paper texts live in memory only (they are large). What is saved is
+  // the set of passages chosen from them, which is what the proposal and the
+  // checks use, so a refresh does not lose the work already done.
+  const paperText = new Map();
+  const paperKey = (p, s) => p.id + ":" + s.id;
+  const projectQuery = (p) => [p.brief, p.theme, p.programme, (p.requirements || []).join(" ")].join(" ");
+
+  async function attachPaper(p, s, file) {
+    try {
+      if (!file) return;
+      if (!/\.pdf$/i.test(file.name)) throw new Error("Attach the paper as a PDF.");
+      setPhMessage(`Reading ${file.name}…`);
+      const raw = await extractPdfText(await file.arrayBuffer());
+      const text = PR.cleanPaperText(raw);
+      const words = text.split(/\s+/).filter(Boolean).length;
+      if (words < 600) throw new Error(`Only ${words} words could be read from that file. It may be a scan or a short preview. Use a PDF with selectable text (try the open-access link, or the publisher's full PDF).`);
+      paperText.set(paperKey(p, s), text);
+      s.paperWords = words; s.paperName = file.name; s.use = true;
+      s.passages = PR.pickPassages(text, projectQuery(p), 7000);
+      p.updatedAt = new Date().toISOString(); savePhd();
+      setPhMessage(`Read ${words.toLocaleString()} words of ${s.id}. ${s.passages.length.toLocaleString()} characters of the passages that matter for your project will be used.`);
+    } catch (e) { setPhMessage(e.message || String(e)); }
+    state.openPhd.add(p.id); renderPhd();
+  }
+
+  // Re-choose the passages against the notes as they are now.
+  function refreshPassages(p) {
+    for (const s of p.sources) { const t = paperText.get(paperKey(p, s)); if (t) s.passages = PR.pickPassages(t, projectQuery(p), 7000); }
+  }
+
   function usedSources(p) { return p.sources.filter((x) => x.use).sort((a, b) => parseInt(a.id.slice(1), 10) - parseInt(b.id.slice(1), 10)); }
   function targetFor(p) { return p.targetWords > 0 ? p.targetWords : PR.targetWords(p.advert); }
 
@@ -1133,8 +1237,9 @@
       const style = myStyle();
       if (!style) throw new Error(`Add your own writing first (the "Your writing" box above, at least ${PR.MIN_STYLE_WORDS} words). Without it the draft cannot be matched to your voice and would come out in a generic one.`);
       const sources = usedSources(p);
-      const withText = sources.filter((x) => (x.abstract || "").length >= 150 || x.notes);
-      if (withText.length < 4) throw new Error("Tick at least 4 sources that have an abstract (or a passage you pasted from the paper). Everything in the proposal is written from those papers, and a paper with only a title gives nothing to write from. Find sources, or add papers by DOI.");
+      refreshPassages(p);
+      const withText = sources.filter((x) => (x.abstract || "").length >= 150 || x.notes || x.passages);
+      if (withText.length < 4) throw new Error("Tick at least 4 sources that have an abstract (or the paper attached, or a passage you pasted). Everything in the proposal is written from those papers, and a paper with only a title gives nothing to write from. Find sources, or add papers by DOI.");
       const target = targetFor(p);
       const styleText = PR.describeStyle(style);
       const excerpts = PR.styleExcerpts(state.styleText, 3, 130);
@@ -1156,6 +1261,7 @@
       p.proposalReport = {
         words: best.report.words, target, passes, at: new Date().toISOString(),
         cited: best.report.cites.cited, remaining: best.report.problems, style: best.report.style.rows,
+        evidence: (best.report.evidence && best.report.evidence.rows) || [],
       };
       p.updatedAt = new Date().toISOString(); savePhd();
       setPhMessage(best.report.problems.length
@@ -1182,7 +1288,7 @@
   }
 
   function recheckWording(p) {
-    const r = PR.checkWording(p.proposalFull, myStyle(), targetFor(p), [state.styleText, state.cvText, p.brief, p.proposal, p.advert, ...p.sources.map((x) => `${x.abstract} ${x.title} ${x.notes || ""}`)].join("\n"));
+    const r = PR.checkWording(p.proposalFull, myStyle(), targetFor(p), [state.styleText, state.cvText, p.brief, p.proposal, p.advert, ...p.sources.map((x) => PR.sourceText(x))].join("\n"));
     p.proposalReport = Object.assign({}, p.proposalReport || {}, { words: r.words, target: targetFor(p), remaining: r.problems, style: r.style.rows });
     savePhd();
     setPhMessage(r.problems.length ? `${r.problems.length} wording problem${r.problems.length === 1 ? "" : "s"} found.` : "Wording checks pass.");
@@ -1228,10 +1334,17 @@
           el("div", {}, [
             el("label", { for: cb.id, style: "margin:0;color:var(--carbon);font-size:12.5px" }, [
               document.createTextNode(`${s.id}: ${a.who} (${s.year}) ${s.title}${s.venue ? ", " + s.venue : ""}`),
-              s.abstract && s.abstract.length >= 150 ? document.createTextNode("") : el("span", { class: "tag", text: s.notes ? "your passage" : "no abstract" }),
+              s.abstract && s.abstract.length >= 150 ? document.createTextNode("") : el("span", { class: "tag", text: s.passages || s.notes ? "paper text" : "no abstract" }),
             ]),
             (() => {
-              const d = el("details", {}, [el("summary", { class: "small", text: s.notes ? "Passages you copied from this paper" : "Add a passage from the full paper" })]);
+              const have = paperText.has(paperKey(p, s));
+              const d = el("details", {}, [el("summary", { class: "small", text: s.paperWords ? `Full paper attached (${s.paperWords.toLocaleString()} words)${have ? "" : ", attach again after a refresh to re-pick passages"}` : "Attach the full paper (PDF) so the proposal is written from it" })]);
+              const fi = el("input", { type: "file", accept: ".pdf,application/pdf", "aria-label": `Full paper PDF for ${s.title}` });
+              fi.addEventListener("change", () => { const f = fi.files[0]; fi.value = ""; attachPaper(p, s, f); });
+              d.appendChild(fi);
+              if (s.oaUrl) d.appendChild(el("div", { class: "small" }, [document.createTextNode("A free copy may be here: "), el("a", { href: s.oaUrl, target: "_blank", rel: "noopener", text: "open the free copy" }), document.createTextNode(", save it as PDF, then attach it above.")]));
+              else d.appendChild(el("div", { class: "small", text: "No free copy was found. If your university library gives you access, download the PDF there and attach it." }));
+              d.appendChild(el("div", { class: "small", text: "Or paste passages by hand:" }));
               const ta = el("textarea", { "aria-label": `Passages from ${s.title}`, placeholder: "Paste sentences from the paper that matter for your proposal. The proposal may then draw on them as well as the abstract." });
               ta.value = s.notes || "";
               ta.addEventListener("change", () => { s.notes = ta.value.slice(0, 3000); savePhd(); state.openPhd.add(p.id); renderPhd(); });
@@ -1285,6 +1398,11 @@
       const t = el("table", { class: "cmp" }, [el("tr", {}, ["How it reads", "You", "This draft", ""].map((x) => el("th", { text: x })))]);
       for (const row of r.style) t.appendChild(el("tr", {}, [row.label, String(row.yours), String(row.draft), row.flag ? "differs" : ""].map((x, i) => el("td", { text: x, class: i === 3 && x ? "flag" : "" }))));
       box.appendChild(t);
+    }
+    if (r.evidence && r.evidence.length) {
+      box.appendChild(el("h4", { text: "Where each source says it", style: "margin-top:10px" }));
+      box.appendChild(el("p", { class: "small", text: "Words the draft quoted from the attached papers to back its claims. A tick means the words were found in that paper's text; a cross means they were not." }));
+      box.appendChild(el("ul", { class: "warn-list" }, r.evidence.map((e) => el("li", { text: `${e.found ? "✓" : "✗"} [${e.id}] “${e.quote}”` }))));
     }
     const cited = (r.cited || []).map((id) => p.sources.find((x) => x.id === id)).filter(Boolean);
     if (cited.length) {
@@ -1787,6 +1905,8 @@
     if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
     wireDocs();
+    document.getElementById("aq-go").addEventListener("click", aqWrite);
+    document.getElementById("aq-role").addEventListener("change", aqFill);
     loadData();
   });
 })();
