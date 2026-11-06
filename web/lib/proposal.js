@@ -218,6 +218,14 @@
 
   function stripJats(s) { return String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().replace(/^abstract\s*/i, ""); }
 
+  // A free copy of the paper, when OpenAlex knows of one. Used only as a link
+  // for the applicant to open and download; nothing is fetched from it.
+  function oaLink(w) {
+    const loc = (w && (w.best_oa_location || w.open_access)) || {};
+    const u = loc.pdf_url || loc.landing_page_url || loc.oa_url || (w && w.open_access && w.open_access.oa_url) || "";
+    return /^https?:\/\//.test(u) ? u : "";
+  }
+
   function fromOpenAlex(w) {
     if (!w || !(w.title || w.display_name)) return null;
     const authors = (w.authorships || []).map((a) => a && a.author && splitName(a.author.display_name)).filter(Boolean);
@@ -228,6 +236,7 @@
       venue: (src && src.display_name) || "", volume: b.volume || "", issue: b.issue || "",
       pages: b.first_page ? (b.last_page && b.last_page !== b.first_page ? b.first_page + "–" + b.last_page : b.first_page) : "",
       doi: cleanDoi(w.doi), abstract: abstractFromInverted(w.abstract_inverted_index), cited: w.cited_by_count || 0, type: w.type || "", from: "OpenAlex",
+      oaUrl: oaLink(w),
     };
   }
 
@@ -560,6 +569,80 @@
     return out;
   }
 
+  // ------------------------------------------------------------ full papers
+  // The applicant attaches the paper's PDF; its text is read in the browser.
+  // Only the passages that matter for this proposal go to Gemini, and every
+  // check runs against what the paper really says.
+  function cleanPaperText(raw) {
+    let t = String(raw || "").replace(/\u00ad/g, "").replace(/(\w)-\s*\n\s*(\w)/g, "$1$2").replace(/\s+/g, " ").trim();
+    // drop the reference list: the last "References" heading in the final 40%
+    const rx = /\b(references|bibliography|reference list)\b(?=\s+(?:\[1\]|1[.\s]|[A-Z]))/gi;
+    let m, cut = -1;
+    while ((m = rx.exec(t))) if (m.index > t.length * 0.6) cut = m.index;
+    if (cut > 0) t = t.slice(0, cut).trim();
+    return t;
+  }
+
+  function paperChunks(text, size) {
+    const max = size || 650;
+    const sents = String(text || "").split(/(?<=[.!?])\s+(?=[A-Z0-9"'(\[])/);
+    const out = []; let cur = "";
+    for (const s of sents) {
+      if (cur && cur.length + s.length > max) { out.push(cur.trim()); cur = ""; }
+      cur += s + " ";
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out.filter((c) => c.length > 80);
+  }
+
+  const MARKERS = /\b(we (?:propose|present|use|used|train|trained|evaluate|evaluated|find|found|show|showed|compare|compared|collected)|results? (?:show|showed|indicate)|limitation|future work|dataset|baseline|accuracy|false positive|in this paper|contribution|conclusion|however)\b/i;
+
+  // The passages most relevant to the applicant's project, in the order they
+  // appear in the paper, up to maxChars. Chosen by shared terms with the
+  // query (the applicant's notes and the programme theme), with a lift for
+  // sentences that state methods, results and limits.
+  function pickPassages(text, query, maxChars) {
+    const limit = maxChars || 7000;
+    const chunks = paperChunks(text);
+    if (!chunks.length) return "";
+    const q = stems(query);
+    const df = new Map();
+    const cs = chunks.map((c) => { const st = stems(c); for (const w of st) df.set(w, (df.get(w) || 0) + 1); return st; });
+    const scored = chunks.map((c, i) => {
+      let sc = 0; for (const w of cs[i]) if (q.has(w)) sc += 1 / Math.log(2 + (df.get(w) || 1));
+      if (MARKERS.test(c)) sc += 0.6;
+      return { i, c, sc };
+    }).sort((a, b) => b.sc - a.sc || a.i - b.i);
+    const keep = []; let n = 0;
+    for (const x of scored) { if (x.sc <= 0) break; if (n + x.c.length > limit) continue; keep.push(x); n += x.c.length; if (n >= limit) break; }
+    return keep.sort((a, b) => a.i - b.i).map((x) => x.c).join(" … ");
+  }
+
+  // Everything a source can be checked against.
+  function sourceText(s) { return `${s.title || ""} ${s.abstract || ""} ${s.notes || ""} ${s.passages || ""}`; }
+  const hasPaper = (s) => !!((s.passages && s.passages.length > 200) || (s.notes && s.notes.length > 200));
+
+  // The evidence block: for each source with the paper's text, one quote
+  // copied from it. Verified against that text, so a claim has to be traceable.
+  function splitEvidence(draft) {
+    const t = String(draft || "");
+    const i = t.search(/^\s*EVIDENCE:?\s*$/im);
+    if (i < 0) return { body: t, evidence: [] };
+    const evidence = [];
+    for (const line of t.slice(i).split("\n").slice(1)) {
+      const m = line.match(/^\s*[-*]?\s*\[?(S\d+)\]?[\s:.-]*["“'‘](.+?)["”'’]\s*$/);
+      if (m) evidence.push({ id: m[1], quote: m[2].replace(/\s+/g, " ").trim() });
+    }
+    return { body: t.slice(0, i).trimEnd(), evidence };
+  }
+
+  function evidenceCheck(evidence, sources, cited) {
+    const by = new Map(sources.map((x) => [x.id, x]));
+    const rows = (evidence || []).map((e) => ({ id: e.id, quote: e.quote, found: !!by.get(e.id) && quoteFound(e.quote, sourceText(by.get(e.id))) }));
+    const missing = (cited || []).filter((id) => by.get(id) && hasPaper(by.get(id)) && !rows.some((r) => r.id === id && r.found));
+    return { rows, missing, wrong: rows.filter((r) => !r.found) };
+  }
+
   function supportCheck(text, sources) {
     const by = new Map(sources.map((s) => [s.id, s]));
     const weak = [];
@@ -570,9 +653,14 @@
       if (!tags.length) continue;
       const mine = stems(sent.replace(new RegExp(TAG.source, "g"), ""));
       if (mine.size < 4) continue;
-      const theirs = new Set();
-      for (const id of tags) { const s = by.get(id); for (const w of stems(`${s.title} ${s.abstract || ""} ${s.notes || ""}`)) theirs.add(w); }
-      let shared = 0; for (const w of mine) if (theirs.has(w)) shared++;
+      // a sentence is judged against the single best passage of each cited
+      // paper, not the whole text, so a long paper cannot vouch for anything
+      let shared = 0;
+      for (const id of tags) {
+        const s = by.get(id);
+        const segs = [`${s.title} ${s.abstract || ""}`, ...(s.notes ? (s.notes.length < 700 ? [s.notes] : paperChunks(s.notes)) : []), ...paperChunks((s.passages || "").replace(/ … /g, " "))];
+        for (const seg of segs) { const st = stems(seg); let c = 0; for (const w of mine) if (st.has(w)) c++; if (c > shared) shared = c; }
+      }
       const need = mine.size >= 8 ? 3 : 2;
       if (shared < need) weak.push({ sentence: sent.replace(new RegExp(TAG.source, "g"), "").replace(/\s+/g, " ").trim(), tags, shared });
     }
@@ -583,9 +671,11 @@
   function srcBlock(sources) {
     return sources.map((s) => {
       const a = authorYear(s);
-      return `[${s.id}] ${a.who} (${s.year}). ${s.title}.${s.venue ? " " + s.venue + "." : ""}\n    ${s.abstract ? "Abstract: " + s.abstract.slice(0, 1500) : "No abstract available: cite this only for what its title states."}${s.notes ? "\n    Passages the applicant copied from the full paper: " + s.notes.slice(0, 3000) : ""}`;
+      return `[${s.id}] ${a.who} (${s.year}). ${s.title}.${s.venue ? " " + s.venue + "." : ""}\n    ${s.abstract ? "Abstract: " + s.abstract.slice(0, 1500) : "No abstract available: cite this only for what its title states."}${s.passages ? "\n    PASSAGES FROM THE FULL PAPER (the paper's own words): " + s.passages.slice(0, 8000) : ""}${s.notes ? "\n    Passages the applicant copied from the full paper: " + s.notes.slice(0, 3000) : ""}`;
     }).join("\n");
   }
+
+  function sources_have_paper(o) { return (o.sources || []).some(hasPaper); }
 
   function buildProposalPrompt(o) {
     const p = o.programme;
@@ -602,6 +692,7 @@
       "3. NOTHING INVENTED. No made-up results, numbers, datasets, tools, collaborators or things the applicant has done. Planned work is described as planned.",
       "4. THEIR PROJECT. Keep the applicant's own research question, method and ideas from their notes" + (o.base ? " and their existing draft (improve and align it, do not replace it)" : "") + ". Shape the framing and the aims to fit this programme's theme. If their work does not really fit the theme, start with one line 'NOTE: ...' saying what does not fit, and then write the best honest proposal anyway.",
       o.story ? "5. THEIR OWN ACCOUNT below is the record of what they have done. Describe their experience only as that account and the CV describe it, and in proportion: lead with what matters most for this programme, give a small relevant detail one sentence, and leave out what is not relevant. Their weaknesses and gaps are real: where one matters for feasibility, say so plainly and say how the plan or training deals with it. Never present a gap as a strength. Every number, duration and employer must match the account or CV." : "",
+      sources_have_paper(o) ? "5b. EVIDENCE. For sources marked PASSAGES FROM THE FULL PAPER, write the claim from those passages, not only the abstract: how the work was done, what it found, what its limits were. After the proposal text, add a line EVIDENCE and then one line per such source you cited, in the form [S2] \"words copied exactly from that source's passages, 8 to 30 words\". Copy the words exactly. Do not paraphrase them. A quote that is not in the passages is treated as invented." : "",
       `6. LENGTH. About ${o.target} words (within 10 percent), not counting the title line. Shorter is better than padded.`,
       "7. STRUCTURE. Plain text. These section headings, each on its own line with no symbols or numbering: " + SECTIONS.join("; ") + ". No bullet points or tables. The three-year plan is three short paragraphs, one per year.",
       "8. VOICE. Write the way this applicant writes: their sentence rhythm, their openers, their punctuation and spelling, in the register of a research proposal (more formal than speech, still theirs). Their style, measured from their own writing:\n" + o.styleText,
@@ -641,6 +732,8 @@
     for (const u of (report.uncited || [])) out.push(`In "${u.section}" this sentence has no citation and is not about you or your plan, so it may come from outside the sources: "${u.sentence}". Support it with a listed source that says it, or cut it.`);
     for (const w of (report.weakSupport || [])) out.push(`This sentence is cited to ${w.tags.map((t) => "[" + t + "]").join(", ")} but shares almost no wording with that paper's abstract, so the paper may not say it: "${w.sentence}". Cite a source that does say it, or cut the claim.`);
     for (const n of (report.numbers || [])) out.push(`The figure "${n}" is not in the applicant's account, CV, notes, advert or the source abstracts. Remove it or state it without a number.`);
+    for (const e of ((report.evidence && report.evidence.wrong) || [])) out.push(`The EVIDENCE quote for [${e.id}] ("${e.quote.slice(0, 80)}") is not in that paper's text. Replace it with words copied exactly from the passages, or remove the claim it was meant to support.`);
+    for (const id of ((report.evidence && report.evidence.missing) || [])) out.push(`[${id}] is cited but has no verified EVIDENCE quote. Add a line under EVIDENCE with words copied exactly from that source's passages, or remove the citation.`);
     for (const id of report.cites.unknown) out.push(`The tag [${id}] is not in the source list. Remove it or replace it with a listed source that really supports the claim.`);
     for (const s of report.cites.selfTyped) out.push(`"${s}" is an author-year citation written by hand. Remove it, or use a [S#] tag from the list if a listed source supports the claim.`);
     for (const i of report.slop.issues) out.push(`Stock phrase "${i.label}" used ${i.count} time${i.count === 1 ? "" : "s"}${i.allowed ? ` (allowed ${i.allowed})` : ""}, for example: "${i.examples[0]}". Say the specific thing plainly instead.`);
@@ -654,7 +747,8 @@
 
   // One pass of every check on a draft (the version with [S#] tags).
   function checkDraft(draft, sources, yourProfile, target, facts) {
-    const body = draft.replace(/^\s*NOTE:[^\n]*\n+/i, "");
+    const sp = splitEvidence(draft);
+    const body = sp.body.replace(/^\s*NOTE:[^\n]*\n+/i, "");
     const prof = styleProfile(body);
     const report = {
       words: prof.words,
@@ -662,10 +756,11 @@
       slop: slopCheck(body),
       style: yourProfile ? compareStyle(yourProfile, prof) : { rows: [], flagged: [] },
       profile: prof,
-      numbers: facts ? numberCheck(body, facts + "\n" + sources.map((x) => `${x.abstract} ${x.title} ${x.notes || ""}`).join("\n")) : [],
+      numbers: facts ? numberCheck(body, facts + "\n" + sources.map((x) => sourceText(x)).join("\n")) : [],
       uncited: uncitedClaims(body),
       weakSupport: supportCheck(body, sources),
     };
+    report.evidence = evidenceCheck(sp.evidence, sources, report.cites.cited);
     report.problems = problemsFor(report, target);
     report.score = report.problems.length;
     return report;
@@ -684,8 +779,9 @@
   }
 
   function finalize(draft, sources, report) {
-    const note = (draft.match(/^\s*NOTE:[^\n]*/i) || [""])[0].trim();
-    const body = draft.replace(/^\s*NOTE:[^\n]*\n+/i, "");
+    const sp = splitEvidence(draft);
+    const note = (sp.body.match(/^\s*NOTE:[^\n]*/i) || [""])[0].trim();
+    const body = sp.body.replace(/^\s*NOTE:[^\n]*\n+/i, "");
     const text = renderCitations(body, sources).trim();
     const refs = referenceList(sources, report.cites.cited);
     return { note, text: text + (refs.length ? "\n\nReferences\n\n" + refs.join("\n\n") : ""), references: refs };
@@ -695,6 +791,7 @@
     MIN_STYLE_WORDS, SECTIONS, styleProfile, describeStyle, styleExcerpts, compareStyle, slopCheck, SLOP_LABELS,
     abstractFromInverted, splitName, cleanDoi, fromOpenAlex, fromCrossref, mergeSources,
     buildQueryPrompt, parseQueries, uncitedClaims, supportCheck, referenceGaps, referenceHtml, suffixMap, quoteFound, buildDirectionsPrompt, parseDirections, directionToBrief, numberCheck, authorYear, referenceLine, verifyCitations, renderCitations, referenceList,
+    cleanPaperText, paperChunks, pickPassages, sourceText, hasPaper, splitEvidence, evidenceCheck, oaLink,
     targetWords, briefProblem, buildProposalPrompt, buildRevisePrompt, problemsFor, checkDraft, checkWording, finalize, splitSentences,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = { Proposal: root.Proposal };
