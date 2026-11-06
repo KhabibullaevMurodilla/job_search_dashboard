@@ -431,6 +431,24 @@
     </section>
 
     <section id="view-apps" role="tabpanel" aria-labelledby="tab-apps" hidden>
+      <details class="pack" id="aq-box">
+        <summary><strong>Answer an application question</strong> (why us, what have you done, describe a time)</summary>
+        <p class="small" style="max-width:64ch">Paste a question from an application form. The answer is written only from your CV, your written background and the posting, then checked: invented figures, copied phrasing and stock wording are flagged, and the length is held to the limit. Where your background has no real example, it tells you what to add.</p>
+        <label for="aq-role">Which role</label>
+        <select id="aq-role" aria-label="Role the answer is for"></select>
+        <div id="aq-free">
+          <input type="text" id="aq-company" placeholder="company (if the role is not saved)" aria-label="Company" style="width:260px">
+          <textarea id="aq-posting" placeholder="paste the posting or the company's own text, so 'why us' can be specific" aria-label="Posting text" style="min-height:80px"></textarea>
+        </div>
+        <label for="aq-question">The question</label>
+        <textarea id="aq-question" placeholder="for example: Why do you want to work for us?" aria-label="The question" style="min-height:60px"></textarea>
+        <div class="row">
+          <input type="number" id="aq-limit" min="20" step="10" placeholder="word limit" aria-label="Word limit" style="width:120px">
+          <button class="btn" id="aq-go">Write the answer</button>
+        </div>
+        <div class="note" id="aq-msg" role="status"></div>
+        <div id="aq-out"></div>
+      </details>
       <div class="toolbar">
         <input type="text" id="ap-search" placeholder="search saved roles" aria-label="Search applications">
         <select id="ap-filter" aria-label="Filter by status">
@@ -476,6 +494,7 @@
 <script src="./lib/pdftools.js"></script>
 <script src="./lib/phd.js"></script>
 <script src="./lib/proposal.js"></script>
+<script src="./lib/answers.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
