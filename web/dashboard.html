@@ -472,6 +472,25 @@
     </section>
 
     <section id="view-apps" role="tabpanel" aria-labelledby="tab-apps" hidden>
+      <details class="pack" id="pf-box">
+        <summary><strong>About me: direction and character</strong> (makes letters and answers sound like you)</summary>
+        <p class="small" style="max-width:66ch">Answer in your own words, in the way you would say it to a colleague. The first four say where you are going, so a letter can say what you are up for next and not only where you have been. The rest show how you work. Nothing here is scored or sent anywhere except to Gemini with your own key when you ask for a draft. It stays in this browser. Save as you go: each box saves itself.</p>
+        <div id="pf-progress" class="small" role="status"></div>
+        <div id="pf-questions"></div>
+        <details class="add" id="pf-scale-box">
+          <summary><strong>Quick personality scale</strong> (50 statements, about 8 minutes, optional)</summary>
+          <p class="small" style="max-width:64ch">A well-known public-domain questionnaire (the IPIP Big-Five markers). Say how accurately each statement describes you as you are at work, not as you would like to be. It is scored by a fixed formula, not by the AI, and the result is a rough guide to how you see yourself, not a diagnosis or a hiring test. The letter writer uses it only to choose emphasis; it never quotes it. Each answer saves as you go.</p>
+          <div id="pf-scale-progress" class="small" role="status"></div>
+          <div id="pf-scale-items"></div>
+          <div id="pf-scale-result"></div>
+        </details>
+        <div class="row">
+          <button class="btn" id="pf-mirror">Find my character from what I have written</button>
+          <button class="btn" id="pf-clear">Clear these answers</button>
+        </div>
+        <div class="note" id="pf-msg" role="status"></div>
+        <div id="pf-traits"></div>
+      </details>
       <details class="pack" id="aq-box">
         <summary><strong>Answer an application question</strong> (why us, what have you done, describe a time)</summary>
         <p class="small" style="max-width:64ch">Paste a question from an application form. The answer is written only from your CV, your written background and the posting, then checked: invented figures, copied phrasing and stock wording are flagged, and the length is held to the limit. Where your background has no real example, it tells you what to add.</p>
@@ -536,7 +555,8 @@
 <script src="./lib/phd.js"></script>
 <script src="./lib/proposal.js"></script>
 <script src="./lib/answers.js"></script>
-<script src="./lib/training.js"></script>
+<script src="./lib/profile.js"></script>
+  <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
