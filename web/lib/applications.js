@@ -49,6 +49,7 @@
       verdict: f.verdict || "",
       coverLetter: "",
       notes: "",
+      companyNotes: "",
       docs: [],
     };
   }
