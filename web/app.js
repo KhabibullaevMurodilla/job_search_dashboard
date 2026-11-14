@@ -1809,8 +1809,10 @@ copied from the account either. Write in a professional register.`;
 
   function trTargets() {
     const t = [];
-    for (const a of state.apps) t.push({ key: TR.targetKey("job", a.id), kind: "job", rec: a, label: `${a.title} at ${a.company}` });
-    for (const p of state.phd) t.push({ key: TR.targetKey("phd", p.id), kind: "phd", rec: p, label: `PhD: ${p.programme} at ${p.university}` });
+    // Rejected and withdrawn applications are over, so there is nothing to prepare for.
+    const live = (r) => ["rejected", "withdrawn"].indexOf(r.status) < 0;
+    for (const a of state.apps.filter(live)) t.push({ key: TR.targetKey("job", a.id), kind: "job", rec: a, label: `${a.title} at ${a.company}` });
+    for (const p of state.phd.filter(live)) t.push({ key: TR.targetKey("phd", p.id), kind: "phd", rec: p, label: `PhD: ${p.programme} at ${p.university}` });
     return t;
   }
   const trCurrent = () => trTargets().find((t) => t.key === tq("tr-target").value) || null;
@@ -1861,6 +1863,95 @@ copied from the account either. Write in a professional register.`;
     clockId = setInterval(tick, 500); setTimeout(tick, 0);
   }
 
+
+  // ---- learn first: a course written for the position
+  let openLesson = null, lessonBusy = false;
+  const trCourse = () => { const t = trCurrent(); return t ? state.train.lessons[t.key] : null; };
+
+  async function trLearn() {
+    try {
+      const t = trCurrent(), ctx = trNeed(t);
+      if (!state.train.lessons[t.key]) {
+        trMsg("Planning your course…");
+        const ready = (state.train.readiness[t.key] || {}).items || [];
+        const items = TR.parseCurriculum(await callGemini(TR.buildCurriculumPrompt({ ctx, cv: state.cvText, story: trStory(), gaps: ready.filter((r) => r.status !== "strong").map((r) => r.requirement).slice(0, 6) })));
+        if (items.length < 3) throw new Error("The course plan could not be read. Press the button again.");
+        state.train.lessons[t.key] = { at: new Date().toISOString(), items };
+        const keys = Object.keys(state.train.lessons);
+        if (keys.length > 10) delete state.train.lessons[keys[0]];
+        saveTrain();
+      }
+      openLesson = null;
+      trMsg("Your course is below. Open a lesson, try the exercise before reading the solution, then test yourself on it.");
+    } catch (e) { trMsg(e.message || String(e)); }
+    renderTrain();
+  }
+
+  async function trOpenLesson(i) {
+    if (lessonBusy) return;
+    const t = trCurrent(), course = trCourse();
+    if (!t || !course || !course.items[i]) return;
+    const it = course.items[i];
+    openLesson = i;
+    if (!it.body) {
+      lessonBusy = true;
+      try {
+        const ctx = trNeed(t);
+        trMsg("Writing the lesson…"); renderLessons();
+        const body = TR.parseLesson(await callGemini(TR.buildLessonPrompt({ ctx, cv: state.cvText, story: trStory(), topic: it.topic, why: it.why })), trFacts());
+        if (!body) throw new Error("The lesson could not be read. Open it again.");
+        trMsg("Having a second reviewer check the lesson for errors…");
+        try { it.check = TR.parseCheck(await callGemini(TR.buildLessonCheckPrompt(body, it.topic))); } catch (e) { it.check = { ok: false, problems: ["It could not be reviewed."], unchecked: true }; }
+        it.body = body; saveTrain(); trMsg("");
+      } catch (e) { openLesson = null; trMsg(e.message || String(e)); }
+      lessonBusy = false;
+    }
+    renderTrain();
+  }
+
+  function renderLessons() {
+    const box = tq("tr-lessons"); if (!box) return; box.textContent = "";
+    const course = trCourse(); if (!course) return;
+    const pr = TR.lessonProgress(course.items);
+    box.appendChild(el("h4", { text: `Your course: ${pr.studied} of ${pr.total} lessons studied` }));
+    box.appendChild(el("p", { class: "small", style: "max-width:70ch", text: "Written by AI for this position from general knowledge, then checked by a second pass. It teaches the subject; it never says what you have done except by quoting your own CV. Confirm details against official documentation before relying on them." }));
+    course.items.forEach((it, i) => {
+      box.appendChild(el("div", { class: "tr-req" }, [el("div", {}, [
+        el("span", { class: "tr-badge " + (it.studied ? "strong" : "thin"), text: it.studied ? "studied" : it.level }),
+        el("button", { class: "btn", text: `${i + 1}. ${it.topic}`, "aria-expanded": openLesson === i ? "true" : "false", onclick: () => trOpenLesson(i) }),
+      ]), el("div", { class: "small", text: it.why })]));
+    });
+    if (openLesson !== null && course.items[openLesson] && course.items[openLesson].body) box.appendChild(lessonCard(course.items[openLesson]));
+    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", text: "Replan this course", onclick: () => { if (window.confirm("Replace this course with a new plan? Lessons you have opened are lost.")) { delete state.train.lessons[trCurrent().key]; saveTrain(); openLesson = null; trLearn(); } } })]));
+  }
+
+  function lessonCard(it) {
+    const b = it.body, card = el("div", { class: "tr-card", id: "tr-lesson" });
+    card.appendChild(el("h4", { text: it.topic }));
+    if (it.check && !it.check.ok) card.appendChild(el("div", { class: "note", text: it.check.unchecked ? "This lesson could not be reviewed. Treat the details with care." : "The reviewer raised concerns, so check these points before relying on them: " + it.check.problems.join("; ") }));
+    card.appendChild(el("p", { text: b.intro }));
+    for (const para of b.explanation) card.appendChild(el("p", { text: para }));
+    if (b.concepts.length) { card.appendChild(el("h5", { text: "Key terms" })); for (const c of b.concepts) card.appendChild(el("div", { class: "small" }, [el("strong", { text: c.term + ": " }), document.createTextNode(c.meaning)])); }
+    if (b.example) { card.appendChild(el("h5", { text: "Worked example: " + b.example.title })); card.appendChild(el("pre", { class: "tr-art", text: b.example.artefact })); if (b.example.walkthrough) card.appendChild(el("p", { text: b.example.walkthrough })); }
+    if (b.mistakes.length) { card.appendChild(el("h5", { text: "Common mistakes" })); card.appendChild(el("ul", {}, b.mistakes.map((m) => el("li", { text: m })))); }
+    if (b.asked) { card.appendChild(el("h5", { text: "How this gets tested" })); card.appendChild(el("p", { text: b.asked })); }
+    if (b.yourRecord) card.appendChild(el("div", { class: "note", text: "Already in your own record: “" + b.yourRecord + "”" }));
+    if (b.exercise) {
+      card.appendChild(el("h5", { text: "Try it first" })); card.appendChild(el("p", { text: b.exercise.task }));
+      card.appendChild(el("textarea", { rows: "4", "aria-label": "Your attempt (not marked, for you only)", placeholder: "Write or sketch your attempt here before opening the solution. It is not saved or marked." }));
+      card.appendChild(el("details", {}, [el("summary", { text: "Show the worked solution" }), el("p", { text: b.exercise.solution })]));
+    }
+    card.appendChild(el("h5", { text: "Check yourself: say the answer aloud, then open it" }));
+    for (const c of b.selfCheck) card.appendChild(el("details", {}, [el("summary", { text: c.q }), el("p", { text: c.a })]));
+    if (b.lookUp.length) card.appendChild(el("p", { class: "small", text: "Read next (search for): " + b.lookUp.join("; ") }));
+    card.appendChild(el("div", { class: "row" }, [
+      el("button", { class: "btn", id: "tr-studied", text: it.studied ? "Marked studied: undo" : "Mark as studied", onclick: () => { it.studied = !it.studied; saveTrain(); renderTrain(); } }),
+      el("button", { class: "btn", id: "tr-lesson-test", text: "Test me on this lesson", onclick: () => trStart("quiz", false, it.topic) }),
+      el("button", { class: "btn", text: "Close lesson", onclick: () => { openLesson = null; renderTrain(); } }),
+    ]));
+    return card;
+  }
+
   // ---- readiness map
   async function trReadiness() {
     try {
@@ -1893,7 +1984,7 @@ copied from the account either. Write in a professional register.`;
   }
 
   // ---- starting a round
-  async function trStart(mode, drill) {
+  async function trStart(mode, drill, only) {
     try {
       if (round && !round.finished && !window.confirm("Leave the round in progress? Answers already marked are kept.")) return;
       const t = trCurrent(), ctx = trNeed(t);
@@ -1901,10 +1992,10 @@ copied from the account either. Write in a professional register.`;
       if (mode === "defence" && !ctx.proposal.trim()) throw new Error("Write or paste the research proposal for this programme first (PhD tab), so there is something to defend.");
       trStopClock(); round = null; renderTrainStage();
       const ready = (state.train.readiness[t.key] || {}).items || [];
-      const focus = TR.focusTopics(state.train, ready, drill ? 3 : 2);
+      const focus = only ? [only] : TR.focusTopics(state.train, ready, drill ? 3 : 2);
       if (drill && !focus.length) throw new Error("No weak spots yet. Do a round first, or build the readiness map, and they will show up here.");
       const asked = state.train.sessions.filter((s) => s.target === t.key).flatMap((s) => s.items.map((i) => i.question)).slice(0, 20);
-      const opts = { mode, ctx, cv: state.cvText, story: trStory(), focus, gaps: ready.filter((r) => r.status !== "strong").map((r) => r.requirement).slice(0, 6), asked, difficulty: tq("tr-level").value, count: TR.MODES[mode].count };
+      const opts = { mode, ctx, cv: state.cvText, story: trStory(), focus, gaps: ready.filter((r) => r.status !== "strong").map((r) => r.requirement).slice(0, 6), asked, difficulty: tq("tr-level").value, count: only ? 5 : TR.MODES[mode].count, only: !!only };
       trMsg(mode === "challenge" ? "Writing practical tasks, then having each one checked…" : "Writing your questions…");
       let items, flagged = false;
       if (mode === "challenge") {
@@ -2080,7 +2171,7 @@ copied from the account either. Write in a professional register.`;
     }
     const rec5 = state.train.sessions.slice(0, 5);
     if (rec5.length) box.appendChild(el("div", { class: "small", style: "margin-top:8px", text: "Recent rounds: " + rec5.map((s) => `${(s.at || "").slice(0, 10)} ${TR.MODES[s.mode] ? TR.MODES[s.mode].label : s.mode} ${s.avg}/10`).join(" · ") }));
-    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-clear", text: "Clear my practice history", onclick: () => { if (window.confirm("Delete all practice scores and readiness maps?")) { state.train = TR.newStats(); state.train.readiness = {}; saveTrain(); round = null; renderTrain(); } } })]));
+    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-clear", text: "Clear my practice history", onclick: () => { if (window.confirm("Delete all practice scores and readiness maps?")) { state.train = TR.newStats(); openLesson = null; saveTrain(); round = null; renderTrain(); } } })]));
   }
 
   function renderTrain() {
@@ -2094,12 +2185,13 @@ copied from the account either. Write in a professional register.`;
     const cur = trCurrent();
     tq("tr-m-defence").hidden = !cur || cur.kind !== "phd";
     tq("tr-speak-wrap").style.display = self.speechSynthesis && self.SpeechSynthesisUtterance ? "flex" : "none";
-    renderReadiness(); renderTrainStage(); renderTrainProgress();
+    renderLessons(); renderReadiness(); renderTrainStage(); renderTrainProgress();
   }
 
   function wireTrain() {
     if (!tq("tr-target")) return;
-    tq("tr-target").addEventListener("change", () => { if (round && round.target !== tq("tr-target").value && !window.confirm("Leave the round in progress?")) { tq("tr-target").value = round.target; return; } if (round) { round = null; } renderTrain(); });
+    tq("tr-target").addEventListener("change", () => { openLesson = null; if (round && round.target !== tq("tr-target").value && !window.confirm("Leave the round in progress?")) { tq("tr-target").value = round.target; return; } if (round) { round = null; } renderTrain(); });
+    tq("tr-m-learn").addEventListener("click", trLearn);
     tq("tr-m-ready").addEventListener("click", trReadiness);
     for (const m of ["interview", "challenge", "quiz", "defence"]) tq("tr-m-" + m).addEventListener("click", () => trStart(m, false));
     tq("tr-m-drill").addEventListener("click", () => trStart("interview", true));
