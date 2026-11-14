@@ -34,6 +34,7 @@
     oaKey: "jr_openalex_key",     // string: optional free OpenAlex key
     myName: "jr_my_name",         // string, used to sign emails and statements
     phd: "jr_phd",                // [PhD application records, see lib/phd.js]
+    train: "jr_training",         // practice progress: topic scores, sessions, readiness maps
   };
 
   const GEMINI_MODEL = "gemini-3.6-flash";
@@ -67,6 +68,7 @@
     apps: lsGet(LS.apps, []),
     phd: self.Phd.normalizeAll(lsGet(LS.phd, [])),
     styleText: lsGet(LS.style, ""),
+    train: (self.Training ? self.Training.normalizeStats(lsGet(LS.train, {})) : { topics: {}, sessions: [], readiness: {} }),
     phFilter: "all", phSearch: "", openPhd: new Set(), busy: new Set(),
     tab: "roles",
     apFilter: "all", apSearch: "",
@@ -447,13 +449,14 @@ copied from the account either. Write in a professional register.`;
     for (const b of document.querySelectorAll("#tabs [data-tab]")) {
       b.setAttribute("aria-selected", b.dataset.tab === name ? "true" : "false");
     }
-    for (const t of ["roles", "score", "apps", "phd", "docs"]) {
+    for (const t of ["roles", "score", "apps", "phd", "train", "docs"]) {
       document.getElementById("view-" + t).hidden = t !== name;
     }
     document.getElementById("panel-filters").hidden = name !== "roles";
     if (name === "apps") renderApps();
     if (name === "phd") renderPhd();
     if (name === "docs") renderDocs();
+    if (name === "train") renderTrain();
   }
 
   // ------------------------------------------------- score a posting
@@ -1793,6 +1796,315 @@ copied from the account either. Write in a professional register.`;
     if (state.tab === "phd") renderPhd();
   });
 
+  // ---------------------------------------------------------------- training ground
+  // A round is held in memory. What is kept between visits is the progress:
+  // topic scores, past sessions and each target's readiness map.
+  const TR = self.Training;
+  let round = null, clockId = null, rec = null;
+  const tq = (id) => document.getElementById(id);
+  const saveTrain = () => lsSet(LS.train, state.train);
+  const trMsg = (t) => { tq("tr-msg").textContent = t; };
+  const trStory = () => ((state.styleText || "").trim().split(/\s+/).length >= 150 ? state.styleText.trim() : "");
+  const trFacts = () => [state.cvText, state.styleText].join("\n");
+
+  function trTargets() {
+    const t = [];
+    for (const a of state.apps) t.push({ key: TR.targetKey("job", a.id), kind: "job", rec: a, label: `${a.title} at ${a.company}` });
+    for (const p of state.phd) t.push({ key: TR.targetKey("phd", p.id), kind: "phd", rec: p, label: `PhD: ${p.programme} at ${p.university}` });
+    return t;
+  }
+  const trCurrent = () => trTargets().find((t) => t.key === tq("tr-target").value) || null;
+
+  function trNeed(t) {
+    if (!TR) throw new Error("This tab needs web/lib/training.js. Add it next to the other files in web/lib/, push, and refresh.");
+    if (!t) throw new Error("Save a role in My applications, or add a PhD programme, then pick it here.");
+    if (!state.cvText.trim()) throw new Error("Upload or paste your CV first (left panel). The practice is checked against it.");
+    const ctx = TR.contextFor(t.kind, t.rec);
+    if (ctx.text.trim().length < 80 && !ctx.requirements.length) throw new Error("This one has no posting or advert text to practise against. Paste it into the record first.");
+    return ctx;
+  }
+
+  function trSpeak(text) {
+    if (!tq("tr-speak").checked || !self.speechSynthesis || !self.SpeechSynthesisUtterance) return;
+    self.speechSynthesis.cancel();
+    const u = new self.SpeechSynthesisUtterance(text); u.lang = "en-GB"; self.speechSynthesis.speak(u);
+  }
+
+  function trMic(ta) {
+    const SR = self.SpeechRecognition || self.webkitSpeechRecognition;
+    if (!SR) return null;
+    const b = el("button", { class: "btn", type: "button", text: "Speak your answer", "aria-pressed": "false" });
+    b.addEventListener("click", () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR(); rec.lang = "en-GB"; rec.continuous = true; rec.interimResults = false;
+      rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) ta.value = (ta.value + " " + e.results[i][0].transcript).trim(); };
+      rec.onend = () => { rec = null; b.textContent = "Speak your answer"; b.setAttribute("aria-pressed", "false"); };
+      rec.onerror = (e) => trMsg("The microphone stopped (" + (e.error || "error") + "). You can type instead.");
+      rec.start(); b.textContent = "Stop listening"; b.setAttribute("aria-pressed", "true");
+    });
+    return b;
+  }
+
+  function trStopClock() { if (clockId) { clearInterval(clockId); clockId = null; } if (rec) { try { rec.stop(); } catch (e) { /* already stopped */ } } }
+
+  function trStartClock(onExpire) {
+    trStopClock();
+    if (!round || !round.seconds) return;
+    const end = Date.now() + round.seconds * 1000;
+    const tick = () => {
+      const clock = tq("tr-clock"); if (!clock) return;
+      const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      clock.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+      clock.classList.toggle("low", left <= 20);
+      if (left <= 0) { trStopClock(); onExpire(); }
+    };
+    clockId = setInterval(tick, 500); setTimeout(tick, 0);
+  }
+
+  // ---- readiness map
+  async function trReadiness() {
+    try {
+      const t = trCurrent(), ctx = trNeed(t);
+      trMsg("Comparing the posting with your record…");
+      const raw = await callGemini(TR.buildReadinessPrompt({ ctx, cv: state.cvText, story: trStory() }));
+      const items = TR.parseReadiness(raw, trFacts());
+      if (!items.length) throw new Error("The requirements the AI returned could not be read. Try again.");
+      state.train.readiness[t.key] = { items, at: new Date().toISOString() };
+      saveTrain(); trMsg(`Readiness map built: ${TR.readinessScore(items)}% ready on paper. Each quote shown was found in your own text.`);
+    } catch (e) { trMsg(e.message || String(e)); }
+    renderTrain();
+  }
+
+  function renderReadiness() {
+    const box = tq("tr-ready"); box.textContent = "";
+    const t = trCurrent(); const r = t && state.train.readiness[t.key];
+    if (!r) return;
+    box.appendChild(el("h4", { text: `Readiness: ${TR.readinessScore(r.items)}%` }));
+    box.appendChild(el("p", { class: "small", text: "How well your own record shows what this asks for. Strong needs a quote from your CV or background; thin means related experience only; missing means nothing written down. This is a mirror of your record, not a prediction." }));
+    for (const x of r.items) {
+      const row = el("div", { class: "tr-req" }, [
+        el("div", {}, [el("span", { class: "tr-badge " + x.status, text: x.status }), el("strong", { text: x.requirement }), document.createTextNode(x.importance === "nice" ? " (nice to have)" : "")]),
+      ]);
+      if (x.evidence) row.appendChild(el("div", { class: "small", text: "✓ “" + x.evidence + "”" }));
+      else if (x.unverified) row.appendChild(el("div", { class: "small", text: "The quote offered for this was not found in your text, so it is not counted." }));
+      if (x.plan) row.appendChild(el("div", { class: "small", text: "Practise: " + x.plan }));
+      box.appendChild(row);
+    }
+  }
+
+  // ---- starting a round
+  async function trStart(mode, drill) {
+    try {
+      if (round && !round.finished && !window.confirm("Leave the round in progress? Answers already marked are kept.")) return;
+      const t = trCurrent(), ctx = trNeed(t);
+      if (mode === "defence" && t.kind !== "phd") throw new Error("Proposal defence is for PhD programmes. Pick one from the list.");
+      if (mode === "defence" && !ctx.proposal.trim()) throw new Error("Write or paste the research proposal for this programme first (PhD tab), so there is something to defend.");
+      trStopClock(); round = null; renderTrainStage();
+      const ready = (state.train.readiness[t.key] || {}).items || [];
+      const focus = TR.focusTopics(state.train, ready, drill ? 3 : 2);
+      if (drill && !focus.length) throw new Error("No weak spots yet. Do a round first, or build the readiness map, and they will show up here.");
+      const asked = state.train.sessions.filter((s) => s.target === t.key).flatMap((s) => s.items.map((i) => i.question)).slice(0, 20);
+      const opts = { mode, ctx, cv: state.cvText, story: trStory(), focus, gaps: ready.filter((r) => r.status !== "strong").map((r) => r.requirement).slice(0, 6), asked, difficulty: tq("tr-level").value, count: TR.MODES[mode].count };
+      trMsg(mode === "challenge" ? "Writing practical tasks, then having each one checked…" : "Writing your questions…");
+      let items, flagged = false;
+      if (mode === "challenge") {
+        items = TR.parseChallenges(await callGemini(TR.buildChallengePrompt(opts)));
+        await Promise.all(items.map(async (it) => { try { it.check = TR.parseCheck(await callGemini(TR.buildChallengeCheckPrompt(it))); } catch (e) { it.check = { ok: false, problems: ["Could not be checked."], unchecked: true }; } }));
+        const good = items.filter((i) => i.check.ok);
+        if (good.length) items = good; else flagged = items.length > 0;
+      } else {
+        items = TR.parseItems(mode, await callGemini(TR.buildQuestionsPrompt(opts)));
+      }
+      if (!items.length) throw new Error("The AI's questions could not be read. Press the button again.");
+      items.forEach((it, i) => { it.id = i; it.turns = [{ q: it.question, a: "", grade: null }]; it.done = false; it.reported = false; it.choice = null; });
+      round = { target: t.key, kind: t.kind, mode, level: opts.difficulty, items, idx: 0, seconds: parseInt(tq("tr-timer").value, 10) || 0, busy: false, flagged, label: t.label };
+      trMsg(`${TR.MODES[mode].label}: ${items.length} item${items.length === 1 ? "" : "s"}${focus.length ? ", aimed at " + focus.join(", ") : ""}.`);
+    } catch (e) { trMsg(e.message || String(e)); }
+    renderTrain();
+  }
+
+  // ---- the round on screen
+  function curItem() { return round.items[round.idx]; }
+  const lastTurn = (it) => it.turns[it.turns.length - 1];
+
+  function renderTrainStage() {
+    const box = tq("tr-stage"); box.textContent = "";
+    trStopClock();
+    if (!round) return;
+    if (round.finished) return renderTrainSummary(box);
+    const it = curItem(), total = round.items.length;
+    const card = el("div", { class: "tr-card" }, [el("h4", { text: `${TR.MODES[round.mode].label}: ${round.idx + 1} of ${total} · ${it.topic}` })]);
+    if (round.flagged && it.mode === "challenge") card.appendChild(el("div", { class: "quality-warn", text: "The automatic check could not confirm this task is sound, so treat the reference answer with care." }));
+    if (it.mode === "challenge") {
+      card.appendChild(el("div", { text: it.title, style: "font-weight:700" }));
+      card.appendChild(el("p", { text: it.scenario }));
+      card.appendChild(el("pre", { class: "tr-art", text: it.artefact }));
+      card.appendChild(el("p", { text: it.task, style: "font-weight:700" }));
+    } else if (it.mode === "quiz") {
+      card.appendChild(el("p", { text: it.question, style: "font-weight:700" }));
+    }
+    if (it.mode === "quiz") {
+      if (!it.done) {
+        it.options.forEach((o, i) => {
+          const id = `tr-opt-${i}`;
+          const r = el("input", { type: "radio", name: "tr-opt", id, value: String(i) });
+          if (it.choice === i) r.checked = true;
+          r.addEventListener("change", () => { it.choice = i; });
+          card.appendChild(el("div", { class: "tr-opt" }, [r, el("label", { for: id, style: "margin:0;color:var(--carbon)", text: o })]));
+        });
+        card.appendChild(el("div", { class: "row" }, [el("span", { id: "tr-clock", class: "tr-clock" }), el("button", { class: "btn", id: "tr-submit", text: "Lock in answer", onclick: () => trQuizSubmit() })]));
+        trStartClock(() => trQuizSubmit());
+        trSpeak(it.question);
+      } else {
+        const g = TR.gradeQuiz(it, it.choice);
+        it.options.forEach((o, i) => card.appendChild(el("div", { class: "tr-opt", text: `${i === it.answer ? "✓" : i === it.choice ? "✗" : "·"} ${o}` })));
+        card.appendChild(el("div", { class: g.correct ? "note" : "quality-warn", text: (g.correct ? "Correct. " : it.choice === null ? "Time ran out. " : "Not quite. ") + it.explanation }));
+        card.appendChild(el("div", { class: "row" }, [
+          el("button", { class: "btn", id: "tr-next", text: round.idx + 1 < total ? "Next" : "Finish", onclick: trAdvance }),
+          el("button", { class: "btn", id: "tr-report", text: it.reported ? "Reported (not counted)" : "This question is wrong", onclick: () => { it.reported = true; renderTrainStage(); } }),
+        ]));
+      }
+    } else {
+      const turn = lastTurn(it);
+      if (it.turns.length > 1) {
+        for (const tt of it.turns.slice(0, -1)) { card.appendChild(el("div", { class: "small", text: "Interviewer: " + tt.q })); card.appendChild(el("div", { class: "small", text: "You: " + (tt.a || "(no answer)") })); }
+      }
+      if (it.mode !== "challenge") card.appendChild(el("p", { class: it.turns.length > 1 ? "tr-push" : "", text: turn.q, style: it.turns.length > 1 ? "" : "font-weight:700" }));
+      else if (it.turns.length > 1) card.appendChild(el("p", { class: "tr-push", text: turn.q }));
+      if (!it.done) {
+        const ta = el("textarea", { id: "tr-answer", "aria-label": "Your answer", placeholder: it.mode === "challenge" ? "What is wrong, why, and how you would fix it" : "Answer as you would in the room", style: "min-height:130px" });
+        ta.value = turn.draft || "";
+        ta.addEventListener("input", () => { turn.draft = ta.value; });
+        card.appendChild(ta);
+        const row = el("div", { class: "row" }, [el("span", { id: "tr-clock", class: "tr-clock" })]);
+        const mic = trMic(ta); if (mic) row.appendChild(mic);
+        row.appendChild(el("button", { class: "btn", id: "tr-submit", text: round.busy ? "Marking…" : "Submit answer", onclick: () => trSubmit(false, false) }));
+        row.appendChild(el("button", { class: "btn", id: "tr-skip", text: "I don't know", onclick: () => trSubmit(false, true) }));
+        card.appendChild(row);
+        if (round.busy) card.querySelectorAll("button").forEach((b) => b.setAttribute("disabled", ""));
+        else { trStartClock(() => trSubmit(true, false)); trSpeak(turn.q); }
+      } else {
+        renderItemReview(card, it);
+      }
+    }
+    box.appendChild(card);
+  }
+
+  function renderItemReview(card, it) {
+    card.appendChild(el("p", { text: `Score for this item: ${it.score}/10`, style: "font-weight:700" }));
+    it.turns.forEach((tt, i) => {
+      const g = tt.grade; if (!g) return;
+      const d = el("div", { class: "small", style: "margin:6px 0" });
+      d.appendChild(el("div", { text: (it.turns.length > 1 ? (i === 0 ? "First answer: " : `After pushback ${i}: `) : "") + g.verdict + ` (${g.score}/10)` }));
+      if (g.strengths.length) d.appendChild(el("div", { text: "Good: " + g.strengths.join("; ") }));
+      if (g.gaps.length) d.appendChild(el("div", { text: "Weak: " + g.gaps.join("; ") }));
+      card.appendChild(d);
+    });
+    const lg = lastTurn(it).grade;
+    if (lg && lg.biggestFix) card.appendChild(el("div", { class: "note", text: "The one change that would help most: " + lg.biggestFix }));
+    const answers = it.turns.map((tt) => tt.a).join("\n");
+    const flags = TR.honestyFlags(answers, trFacts());
+    const claims = it.turns.flatMap((tt) => (tt.grade ? tt.grade.unsupportedClaims : []));
+    if (flags.length || claims.length) {
+      card.appendChild(el("div", { class: "quality-warn" }, [
+        el("div", { text: "Check these before you say them in a real interview. They are not in your CV or your written background, so you could be asked to back them up:" }),
+        el("ul", {}, flags.map((f) => el("li", { text: "figure: " + f })).concat(claims.map((c) => el("li", { text: c })))),
+      ]));
+    }
+    if (it.mode === "challenge") {
+      const d = el("details", {}, [el("summary", { text: "Reference answer" }), el("div", { class: "small", text: "Findings: " + it.reference.findings.join("; ") }), el("div", { class: "small", text: "Fix: " + it.reference.fix }), el("div", { class: "small", text: it.reference.explanation })]);
+      card.appendChild(d);
+    }
+    if (lg && lg.modelAnswer) card.appendChild(el("details", {}, [el("summary", { text: "What a strong answer looks like" }), el("div", { class: "small", style: "white-space:pre-wrap", text: lg.modelAnswer })]));
+    card.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-next", text: round.idx + 1 < round.items.length ? "Next" : "Finish", onclick: trAdvance })]));
+  }
+
+  async function trSubmit(timedOut, skip) {
+    if (!round || round.busy) return;
+    const it = curItem(), turn = lastTurn(it), ta = tq("tr-answer");
+    turn.a = skip ? "" : (ta ? ta.value.trim() : turn.draft || "");
+    round.busy = true; trStopClock(); renderTrainStage();
+    try {
+      const t = trCurrent() || trTargets().find((x) => x.key === round.target);
+      const ctx = TR.contextFor(t.kind, t.rec);
+      const left = skip || timedOut ? 0 : TR.MODES[round.mode].followups - (it.turns.length - 1);
+      const g = TR.parseGrade(await callGemini(TR.buildGradePrompt({ item: it, turns: it.turns.map((x) => ({ q: x.q, a: x.a })), ctx, cv: state.cvText, story: trStory(), followupsLeft: left, timedOut })));
+      if (!g) throw new Error("The marking could not be read. Press Submit again.");
+      turn.grade = g;
+      if (g.followUp && left > 0) it.turns.push({ q: g.followUp, a: "", grade: null });
+      else { it.done = true; it.score = TR.itemScore(it.turns); }
+      trMsg("");
+    } catch (e) { trMsg(e.message || String(e)); }
+    round.busy = false; renderTrainStage();
+  }
+
+  function trQuizSubmit() {
+    if (!round) return;
+    const it = curItem(); if (it.done) return;
+    trStopClock(); it.done = true; it.score = TR.gradeQuiz(it, it.choice).score; renderTrainStage();
+  }
+
+  function trAdvance() {
+    const it = curItem();
+    if (!it.reported && Number.isFinite(it.score)) TR.recordItem(state.train, { topic: it.topic, score: it.score, at: new Date().toISOString() });
+    saveTrain();
+    if (round.idx + 1 < round.items.length) { round.idx += 1; }
+    else {
+      round.finished = true;
+      const used = round.items.filter((i) => !i.reported);
+      const sum = TR.roundSummary(used);
+      round.summary = sum;
+      TR.addSession(state.train, { id: String(Date.now()), at: new Date().toISOString(), target: round.target, label: round.label, mode: round.mode, level: round.level, avg: sum.avg, items: used });
+      saveTrain();
+    }
+    renderTrain();
+  }
+
+  function renderTrainSummary(box) {
+    const s = round.summary;
+    const card = el("div", { class: "tr-card" }, [el("h4", { text: `${TR.MODES[round.mode].label} finished: ${s.avg}/10 over ${s.count} item${s.count === 1 ? "" : "s"}` })]);
+    for (const x of s.byTopic) card.appendChild(el("div", { class: "small" }, [document.createTextNode(`${x.topic}: ${x.avg}/10`), el("div", { class: "tr-bar" }, [el("i", { style: `width:${x.avg * 10}%` })])]));
+    if (s.worst && s.count > 1) card.appendChild(el("div", { class: "note", text: `Weakest this round: ${s.worst.topic}. "Drill my weak spots" will aim there next.` }));
+    card.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-again", text: "Another round", onclick: () => { const m = round.mode; round = null; trStart(m, false); } }), el("button", { class: "btn", text: "Close", onclick: () => { round = null; renderTrain(); } })]));
+    box.appendChild(card);
+  }
+
+  function renderTrainProgress() {
+    const box = tq("tr-progress"); box.textContent = "";
+    const topics = Object.values(state.train.topics);
+    if (!topics.length && !state.train.sessions.length) return;
+    box.appendChild(el("h4", { text: "Your practice so far", style: "margin-top:16px" }));
+    for (const t of topics.sort((a, b) => a.sum / a.n - b.sum / b.n)) {
+      const a = Math.round((t.sum / t.n) * 10) / 10;
+      box.appendChild(el("div", { class: "small", style: "max-width:520px" }, [document.createTextNode(`${t.name}: ${a}/10 over ${t.n} (last ${t.last})`), el("div", { class: "tr-bar" }, [el("i", { style: `width:${a * 10}%` })])]));
+    }
+    const rec5 = state.train.sessions.slice(0, 5);
+    if (rec5.length) box.appendChild(el("div", { class: "small", style: "margin-top:8px", text: "Recent rounds: " + rec5.map((s) => `${(s.at || "").slice(0, 10)} ${TR.MODES[s.mode] ? TR.MODES[s.mode].label : s.mode} ${s.avg}/10`).join(" · ") }));
+    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-clear", text: "Clear my practice history", onclick: () => { if (window.confirm("Delete all practice scores and readiness maps?")) { state.train = TR.newStats(); state.train.readiness = {}; saveTrain(); round = null; renderTrain(); } } })]));
+  }
+
+  function renderTrain() {
+    if (!tq("tr-target")) return;
+    const sel = tq("tr-target"), keep = sel.value;
+    sel.textContent = "";
+    const ts = trTargets();
+    if (!ts.length) sel.appendChild(el("option", { value: "", text: "Nothing saved yet: add a role or a PhD programme first" }));
+    for (const t of ts) sel.appendChild(el("option", { value: t.key, text: t.label }));
+    if (ts.some((t) => t.key === keep)) sel.value = keep;
+    const cur = trCurrent();
+    tq("tr-m-defence").hidden = !cur || cur.kind !== "phd";
+    tq("tr-speak-wrap").style.display = self.speechSynthesis && self.SpeechSynthesisUtterance ? "flex" : "none";
+    renderReadiness(); renderTrainStage(); renderTrainProgress();
+  }
+
+  function wireTrain() {
+    if (!tq("tr-target")) return;
+    tq("tr-target").addEventListener("change", () => { if (round && round.target !== tq("tr-target").value && !window.confirm("Leave the round in progress?")) { tq("tr-target").value = round.target; return; } if (round) { round = null; } renderTrain(); });
+    tq("tr-m-ready").addEventListener("click", trReadiness);
+    for (const m of ["interview", "challenge", "quiz", "defence"]) tq("tr-m-" + m).addEventListener("click", () => trStart(m, false));
+    tq("tr-m-drill").addEventListener("click", () => trStart("interview", true));
+  }
+
   // ------------------------------------------------ merge and split PDFs
   // Held in memory only: documents are personal and large, so they are never
   // written to browser storage.
@@ -1905,6 +2217,7 @@ copied from the account either. Write in a professional register.`;
     if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
     wireDocs();
+    wireTrain();
     document.getElementById("aq-go").addEventListener("click", aqWrite);
     document.getElementById("aq-role").addEventListener("change", aqFill);
     loadData();
