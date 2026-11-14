@@ -30,6 +30,7 @@
     geminiKey: "jr_gemini_key",
     status: "jr_role_status",     // {uid: "applied"|"skipped"}
     apps: "jr_applications",      // [application records, see lib/applications.js]
+    profile: "jr_profile",        // object: direction and character answers, in their own words
     style: "jr_style_samples",    // string: the applicant's own writing, to match their voice
     oaKey: "jr_openalex_key",     // string: optional free OpenAlex key
     myName: "jr_my_name",         // string, used to sign emails and statements
@@ -68,6 +69,7 @@
     apps: lsGet(LS.apps, []),
     phd: self.Phd.normalizeAll(lsGet(LS.phd, [])),
     styleText: lsGet(LS.style, ""),
+    profile: self.Profile ? self.Profile.normalize(lsGet(LS.profile, {})) : null,
     train: (self.Training ? self.Training.normalizeStats(lsGet(LS.train, {})) : { topics: {}, sessions: [], readiness: {} }),
     phFilter: "all", phSearch: "", openPhd: new Set(), busy: new Set(),
     tab: "roles",
@@ -220,13 +222,24 @@ posting, do not hide it or invent a fix: either leave it unmentioned or name it
 briefly with what the candidate does about it. No six-word sequence may be
 copied from the account either. Write in a professional register.`;
     }
+    const PFL = self.Profile;
+    const pf = PFL && state.profile ? state.profile : null;
+    const brief = PFL && pf ? PFL.coverBrief(pf, app.companyNotes) : "";
+    if (brief) prompt += brief;
     const draft = await callGemini(prompt);
     const q = DC.qualityCheckCoverLetter(draft, state.cvText);
+    const own = brief ? PFL.corpus(pf) : "";
+    if (brief) {
+      const copiedOwn = DC.sharedNgram(draft, own, 6);
+      if (copiedOwn) { q.problems.push(`shares "${copiedOwn}" with your own answers word-for-word`); q.ok = false; }
+    }
     if (hasStory) {
       const copied = DC.sharedNgram(draft, story, 6);
       if (copied) { q.problems.push(`shares "${copied}" with your written account word-for-word`); q.ok = false; }
-      const nums = PR.numberCheck(draft, state.cvText + "\n" + story + "\n" + (app.description || ""));
-      if (nums.length) { q.problems.push(`these figures are not in your CV or your account, so check them: ${nums.join(", ")}`); q.ok = false; }
+    }
+    if (hasStory || brief) {
+      const nums = PR.numberCheck(draft, state.cvText + "\n" + story + "\n" + own + "\n" + (app.companyNotes || "") + "\n" + (app.description || ""));
+      if (nums.length) { q.problems.push(`these figures are not in your CV, your account, your answers or the posting, so check them: ${nums.join(", ")}`); q.ok = false; }
     }
     app.coverLetter = draft;
     app.updatedAt = new Date().toISOString();
@@ -645,6 +658,11 @@ copied from the account either. Write in a professional register.`;
     notes.addEventListener("change", () => { app.notes = notes.value; app.updatedAt = new Date().toISOString(); saveApps(); });
     body.appendChild(el("div", {}, [el("h4", { text: "Notes" }), notes]));
 
+    const cn = el("textarea", { "aria-label": "What you know about this company", placeholder: "Paste what you know: their About page, mission, recent news, a product launch, something a person there said. The cover letter and answers may use this and the posting, and nothing else, so it can be specific without guessing." });
+    cn.value = app.companyNotes || "";
+    cn.addEventListener("change", () => { app.companyNotes = cn.value.slice(0, 8000); app.updatedAt = new Date().toISOString(); saveApps(); });
+    body.appendChild(el("div", {}, [el("h4", { text: "What you know about this company" }), cn]));
+
     const letter = el("div", {}, [el("h4", { text: "Cover letter" })]);
     if (app.coverLetter) {
       letter.appendChild(el("pre", { class: "draft-text", text: app.coverLetter }));
@@ -727,6 +745,8 @@ copied from the account either. Write in a professional register.`;
         question, limit: parseInt(document.getElementById("aq-limit").value, 10) || 0,
         title: app ? app.title : "", company: app ? app.company : document.getElementById("aq-company").value.trim(),
         posting, cv: state.cvText, story, styleText: st ? PR.describeStyle(st) : "",
+        profile: self.Profile && state.profile && self.Profile.hasAny(state.profile) ? [self.Profile.block(state.profile), self.Profile.traitsBlock(state.profile)].filter(Boolean).join("\n\n") : "",
+        companyNotes: app ? (app.companyNotes || "") : "",
       };
       msg.textContent = "Writing from your CV" + (story ? " and your background" : "") + "…";
       const raw = await callGemini(AN.buildAnswerPrompt(o));
@@ -1796,6 +1816,96 @@ copied from the account either. Write in a professional register.`;
     if (state.tab === "phd") renderPhd();
   });
 
+
+  // ---------------------------------------------------------------- About me
+  const PF = self.Profile;
+  const pq = (id) => document.getElementById(id);
+  const saveProfile = () => { if (state.profile) { state.profile.at = new Date().toISOString(); lsSet(LS.profile, state.profile); } };
+
+  function renderProfile() {
+    const box = pq("pf-box"); if (!box) return;
+    if (!PF || !state.profile) { pq("pf-msg").textContent = "This box needs web/lib/profile.js. Add it next to the other files in web/lib/, push, and refresh."; return; }
+    const qs = pq("pf-questions");
+    if (!qs.childNodes.length) {
+      let group = "";
+      for (const q of PF.QUESTIONS) {
+        if (q.group !== group) { group = q.group; qs.appendChild(el("h4", { text: group === "direction" ? "Where you are going" : "How you work", style: "margin-top:12px" })); }
+        const ta = el("textarea", { id: "pf-q-" + q.id, "aria-label": q.q, placeholder: q.hint, style: "min-height:70px" });
+        ta.value = state.profile.answers[q.id] || "";
+        ta.addEventListener("change", () => { const v = ta.value.trim().slice(0, 3000); if (v) state.profile.answers[q.id] = v; else delete state.profile.answers[q.id]; saveProfile(); renderProfileProgress(); });
+        qs.appendChild(el("label", { for: "pf-q-" + q.id, text: q.q, style: "margin-top:8px" }));
+        qs.appendChild(ta);
+      }
+    }
+    renderProfileProgress(); renderTraits(); renderScale();
+  }
+  function renderProfileProgress() {
+    const p = PF.progress(state.profile);
+    pq("pf-progress").textContent = `Direction: ${p.direction} of ${p.directionTotal} answered. How you work: ${p.character} of ${p.characterTotal}. A line of five words or more counts.`;
+  }
+  function renderTraits() {
+    const box = pq("pf-traits"); box.textContent = "";
+    const t = state.profile.traits;
+    if (!t.length) return;
+    box.appendChild(el("h4", { text: "How you come across, from your own words" }));
+    box.appendChild(el("p", { class: "small", style: "max-width:64ch", text: "A reflection of what you wrote, not a test result. Keep only what is true of you; kept ones are given to the letter writer as confirmed. Each rests on a quote from your answers." }));
+    t.forEach((x, i) => {
+      const cb = el("input", { type: "checkbox", id: "pf-t-" + i, "aria-label": "Keep: " + x.text });
+      cb.checked = x.keep;
+      cb.addEventListener("change", () => { x.keep = cb.checked; saveProfile(); });
+      box.appendChild(el("div", { class: "tr-req" }, [el("div", {}, [cb, document.createTextNode(" "), el("strong", { text: x.text })]), el("div", { class: "small", text: "From: “" + x.quote + "”" })]));
+    });
+  }
+
+  function renderScale() {
+    const items = pq("pf-scale-items"); if (!items) return;
+    if (!items.childNodes.length) {
+      for (const it of PF.ITEMS) {
+        const sel = el("select", { id: "pf-s-" + it.n, "aria-label": `${it.n}. ${it.text}` }, [el("option", { value: "", text: "choose" })].concat(PF.SCALE.map((t, i) => el("option", { value: String(i + 1), text: `${i + 1} ${t}` }))));
+        sel.value = state.profile.test[it.n] ? String(state.profile.test[it.n]) : "";
+        sel.addEventListener("change", () => { if (sel.value) state.profile.test[it.n] = Number(sel.value); else delete state.profile.test[it.n]; saveProfile(); renderScale(); });
+        items.appendChild(el("div", { class: "tr-req", style: "display:flex;gap:10px;flex-wrap:wrap;align-items:center" }, [el("label", { for: "pf-s-" + it.n, text: `${it.n}. ${it.text}`, style: "flex:1 1 220px;margin:0" }), sel]));
+      }
+    } else {
+      for (const it of PF.ITEMS) { const sel = pq("pf-s-" + it.n); const v = state.profile.test[it.n] ? String(state.profile.test[it.n]) : ""; if (sel && sel.value !== v) sel.value = v; }
+    }
+    const n = PF.scaleCount(state.profile.test);
+    pq("pf-scale-progress").textContent = `${n} of 50 answered.` + (n < 50 ? " Each of the five results needs its own ten statements answered." : "");
+    const res = pq("pf-scale-result"); res.textContent = "";
+    const sc = PF.scoreScale(state.profile.test);
+    if (!Object.values(sc).some(Boolean)) return;
+    res.appendChild(el("h4", { text: "Your result" }));
+    res.appendChild(el("p", { class: "small", style: "max-width:64ch", text: "Read each as low, middle or high on the 1 to 5 scale itself. No population norms are applied, so this says how you rated yourself, not how you compare with other people." }));
+    for (const d of Object.keys(PF.DIMS)) {
+      const r = sc[d];
+      if (!r) { res.appendChild(el("div", { class: "small", text: `${PF.DIMS[d].name}: answer all ten of its statements to see this.` })); continue; }
+      res.appendChild(el("div", { class: "small", style: "max-width:560px" }, [el("strong", { text: `${PF.DIMS[d].name}: ${r.band} (${r.mean} of 5). ` }), document.createTextNode(`This person ${PF.DIMS[d][r.band]}.`), el("div", { class: "tr-bar" }, [el("i", { style: `width:${(r.mean - 1) * 25}%` })])]));
+    }
+  }
+
+  async function pfMirror() {
+    const msg = pq("pf-msg");
+    try {
+      if (!state.profile) throw new Error("This box needs web/lib/profile.js.");
+      const story = (state.styleText || "").trim().split(/\s+/).length >= 150 ? state.styleText.trim() : "";
+      if (PF.answered(state.profile).length < 4 && !story) throw new Error("There is not enough of your own writing yet. Answer at least four of the questions above, or load your written background (Your writing and background, PhD tab), then try again.");
+      msg.textContent = "Reading your answers" + (story ? ", your background" : "") + " and your CV…";
+      const t = PF.parseMirror(await callGemini(PF.buildMirrorPrompt(state.profile, state.cvText, story)), state.profile, state.cvText, story);
+      if (!t.length) throw new Error("Nothing came back that rests on your own words. Add more detail and try again.");
+      state.profile.traits = t; saveProfile(); renderTraits();
+      msg.textContent = `${t.length} observations, each tied to a quote from you. Untick any that are not true.`;
+    } catch (e) { msg.textContent = e.message || String(e); }
+  }
+  function wireProfile() {
+    if (!pq("pf-box")) return;
+    pq("pf-mirror").addEventListener("click", pfMirror);
+    pq("pf-clear").addEventListener("click", () => {
+      if (!window.confirm("Delete all your answers here and the observations?")) return;
+      state.profile = PF ? PF.empty() : null; saveProfile(); pq("pf-questions").textContent = ""; pq("pf-scale-items").textContent = ""; pq("pf-msg").textContent = ""; renderProfile();
+    });
+    renderProfile();
+  }
+
   // ---------------------------------------------------------------- training ground
   // A round is held in memory. What is kept between visits is the progress:
   // topic scores, past sessions and each target's readiness map.
@@ -2309,7 +2419,7 @@ copied from the account either. Write in a professional register.`;
     if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
     wireDocs();
-    wireTrain();
+    wireTrain(); wireProfile();
     document.getElementById("aq-go").addEventListener("click", aqWrite);
     document.getElementById("aq-role").addEventListener("change", aqFill);
     loadData();
