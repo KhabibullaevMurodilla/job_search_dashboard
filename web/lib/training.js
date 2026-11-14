@@ -116,7 +116,7 @@
     const common = [
       INTERVIEWER, "",
       ctxBlock(o.ctx), "", whoBlock(o.cv, o.story), "",
-      o.focus && o.focus.length ? "The candidate is weakest on: " + o.focus.join("; ") + ". Aim at least " + Math.min(2, o.focus.length) + " questions at these." : "",
+      o.only && o.focus && o.focus.length ? "Ask EVERY question about this lesson topic, the one the candidate has just studied: " + o.focus.join("; ") + "." : o.focus && o.focus.length ? "The candidate is weakest on: " + o.focus.join("; ") + ". Aim at least " + Math.min(2, o.focus.length) + " questions at these." : "",
       o.gaps && o.gaps.length ? "Gaps between the posting and the candidate's record: " + o.gaps.join("; ") + ". A real panel would probe these." : "",
       o.asked && o.asked.length ? "Do not repeat these earlier questions: " + o.asked.slice(-20).join(" | ") : "",
       tough ? "Difficulty: TOUGH. Ask the questions a sceptical panel asks. Probe for evidence, trade-offs and what went wrong." : "Difficulty: standard.",
@@ -277,7 +277,7 @@
   }
 
   // ------------------------------------------------------------ progress
-  function newStats() { return { topics: {}, sessions: [] }; }
+  function newStats() { return { topics: {}, sessions: [], readiness: {}, lessons: {} }; }
   const topicKey = (t) => norm(t) || "general";
 
   function recordItem(stats, o) {
@@ -323,19 +323,110 @@
     return stats;
   }
 
+
+  // ------------------------------------------------------------ lessons
+  // Teaching content comes first, practice after. A short syllabus is written
+  // for the position, then each lesson is written when opened and reviewed by a
+  // second call. The model teaches from general knowledge, so lessons carry a
+  // reviewer's concerns and never claim anything about the candidate that the
+  // CV or account does not show.
+  const LEVEL_NAMES = ["foundation", "core", "advanced"];
+  function buildCurriculumPrompt(o) {
+    return [
+      "You are a patient senior engineer and teacher. Plan a short course that gets a capable candidate ready for the knowledge and the practical tests this position will examine.",
+      "", ctxBlock(o.ctx), "", whoBlock(o.cv, o.story), "",
+      o.gaps && o.gaps.length ? "Where the candidate's record is thin or missing: " + o.gaps.join("; ") + ". Spend more lessons here." : "",
+      "Return ONLY JSON: {\"lessons\":[{\"topic\":\"2-5 words\",\"level\":\"foundation\"|\"core\"|\"advanced\",\"why\":\"one sentence: why this role or programme tests it\"}]}",
+      "Rules: 6 to 8 lessons in the order to learn them (foundations first); each a skill or body of knowledge the posting names or clearly implies; no soft-skill filler; no lesson about the employer itself.",
+    ].filter(Boolean).join("\n");
+  }
+  function parseCurriculum(text) {
+    const j = parseJson(text);
+    const list = j && Array.isArray(j.lessons) ? j.lessons : Array.isArray(j) ? j : [];
+    const out = [], seen = new Set();
+    for (const x of list) {
+      const topic = str(x && x.topic, 80);
+      if (!topic || seen.has(norm(topic))) continue;
+      seen.add(norm(topic));
+      out.push({ topic, level: LEVEL_NAMES.indexOf(x.level) >= 0 ? x.level : "core", why: str(x.why, 300), body: null, check: null, studied: false });
+    }
+    return out.slice(0, 8);
+  }
+
+  function buildLessonPrompt(o) {
+    return [
+      "You are a patient senior engineer teaching one lesson to a capable candidate who is preparing for the position below. Teach correctly and concretely, at the depth a real interview or practical test would need. Use plain words; define each term the first time.",
+      "", ctxBlock(o.ctx), "", whoBlock(o.cv, o.story), "",
+      "LESSON TOPIC: " + o.topic + (o.why ? " (" + o.why + ")" : ""),
+      "Return ONLY JSON: {\"intro\":\"what this is and why it matters for this position, 2-3 sentences\",\"explanation\":[\"paragraph\",\"paragraph\"],\"concepts\":[{\"term\":\"...\",\"meaning\":\"...\"}],\"example\":{\"title\":\"...\",\"artefact\":\"a short real config, command output, query or snippet\",\"walkthrough\":\"read it line by line and say what it shows\"},\"mistakes\":[\"common mistake and how to avoid it\"],\"asked\":\"how an interviewer or test usually probes this, with one sample question\",\"yourRecord\":\"words copied exactly from the CV or account that relate to this topic, or empty\",\"exercise\":{\"task\":\"something to try on paper or in a lab before looking at the solution\",\"solution\":\"the worked solution\"},\"selfCheck\":[{\"q\":\"recall question\",\"a\":\"short correct answer\"}],\"lookUp\":[\"search terms or official documentation names to read next\"]}",
+      "Rules:",
+      "- explanation: 2 to 4 paragraphs that build understanding step by step. concepts: 3 to 8. selfCheck: 3 to 5 questions whose answers are in this lesson.",
+      "- The example must be technically correct and realistic. If you are not sure of a detail, leave it out rather than guess; never invent version numbers, product behaviour or statistics.",
+      "- yourRecord must be copied EXACTLY from the CV or account (6 to 30 words) or be empty. Never say what the candidate has done unless that quote shows it.",
+      "- lookUp: names of documentation or search terms only. Do not write web addresses.",
+    ].join("\n");
+  }
+  function parseLesson(text, corpus) {
+    const j = parseJson(text);
+    if (!j || typeof j !== "object") return null;
+    const explanation = arr(j.explanation, 5, 1500);
+    const concepts = (Array.isArray(j.concepts) ? j.concepts : []).map((c) => ({ term: str(c && c.term, 80), meaning: str(c && c.meaning, 400) })).filter((c) => c.term && c.meaning).slice(0, 8);
+    const selfCheck = (Array.isArray(j.selfCheck) ? j.selfCheck : []).map((c) => ({ q: str(c && c.q, 300), a: str(c && c.a, 500) })).filter((c) => c.q && c.a).slice(0, 5);
+    const intro = str(j.intro, 600);
+    if (!intro || !explanation.length || selfCheck.length < 2) return null;
+    let yourRecord = str(j.yourRecord, 400), unverifiedRecord = false;
+    if (yourRecord) {
+      const q = norm(yourRecord);
+      if (q.split(" ").length < 4 || !norm(corpus).includes(q)) { yourRecord = ""; unverifiedRecord = true; }
+    }
+    const ex = j.example && typeof j.example === "object" ? j.example : {};
+    const exercise = j.exercise && typeof j.exercise === "object" ? j.exercise : {};
+    return {
+      intro, explanation, concepts,
+      example: str(ex.artefact, 3000) ? { title: str(ex.title, 120), artefact: str(ex.artefact, 3000), walkthrough: str(ex.walkthrough, 1500) } : null,
+      mistakes: arr(j.mistakes, 5, 300), asked: str(j.asked, 600), yourRecord, unverifiedRecord,
+      exercise: str(exercise.task, 800) && str(exercise.solution, 2000) ? { task: str(exercise.task, 800), solution: str(exercise.solution, 2000) } : null,
+      selfCheck, lookUp: arr(j.lookUp, 5, 120).filter((x) => !/https?:\/\//i.test(x)),
+    };
+  }
+  function buildLessonCheckPrompt(l, topic) {
+    return [
+      "You are a strict technical reviewer. Below is a lesson written to teach \"" + topic + "\". Look for statements that are wrong, outdated or misleading, an example that would not work as shown, and self-check answers that are incorrect.",
+      "", "EXPLANATION:\n" + l.explanation.join("\n\n"),
+      "", "CONCEPTS:\n" + l.concepts.map((c) => c.term + ": " + c.meaning).join("\n"),
+      l.example ? "\nEXAMPLE:\n" + l.example.artefact + "\n" + l.example.walkthrough : "",
+      l.exercise ? "\nEXERCISE SOLUTION:\n" + l.exercise.solution : "",
+      "\nSELF-CHECK:\n" + l.selfCheck.map((c) => c.q + " -> " + c.a).join("\n"),
+      "", "Return ONLY JSON: {\"ok\":true|false,\"problems\":[\"each concrete error, briefly\"]}. ok is true only if you found no real error.",
+    ].filter(Boolean).join("\n");
+  }
+  function lessonProgress(lessons) {
+    const l = Array.isArray(lessons) ? lessons : [];
+    return { total: l.length, studied: l.filter((x) => x.studied).length };
+  }
+  function normalizeLessons(x) {
+    const out = {};
+    for (const [k, v] of Object.entries(x && typeof x === "object" ? x : {})) {
+      if (!v || !Array.isArray(v.items)) continue;
+      out[k] = { at: str(v.at, 40), items: v.items.slice(0, 8).map((i) => ({ topic: str(i && i.topic, 80), level: LEVEL_NAMES.indexOf(i && i.level) >= 0 ? i.level : "core", why: str(i && i.why, 300), body: i && i.body && typeof i.body === "object" && Array.isArray(i.body.explanation) ? i.body : null, check: i && i.check && typeof i.check === "object" ? { ok: i.check.ok === true, problems: arr(i.check.problems, 5, 300), unchecked: !!i.check.unchecked } : null, studied: !!(i && i.studied) })).filter((i) => i.topic) };
+    }
+    return out;
+  }
+
   function normalizeStats(x) {
     const s = x && typeof x === "object" ? x : {};
     const topics = {};
     for (const [k, v] of Object.entries(s.topics && typeof s.topics === "object" ? s.topics : {})) {
       if (v && Number.isFinite(v.n) && Number.isFinite(v.sum)) topics[k] = { name: str(v.name, 60) || k, n: v.n, sum: v.sum, last: Number.isFinite(v.last) ? v.last : 0, lastAt: str(v.lastAt, 40) };
     }
-    return { topics, sessions: Array.isArray(s.sessions) ? s.sessions.slice(0, 40) : [], readiness: s.readiness && typeof s.readiness === "object" ? s.readiness : {} };
+    return { topics, sessions: Array.isArray(s.sessions) ? s.sessions.slice(0, 40) : [], readiness: s.readiness && typeof s.readiness === "object" ? s.readiness : {}, lessons: normalizeLessons(s.lessons) };
   }
 
   const api = {
     MODES, LEVELS, parseJson, targetKey, contextFor, buildReadinessPrompt, parseReadiness, readinessScore,
     buildQuestionsPrompt, parseItems, buildChallengePrompt, parseChallenges, buildChallengeCheckPrompt, parseCheck,
     buildGradePrompt, parseGrade, honestyFlags, gradeQuiz, itemScore,
+    buildCurriculumPrompt, parseCurriculum, buildLessonPrompt, parseLesson, buildLessonCheckPrompt, lessonProgress, normalizeLessons,
     newStats, recordItem, weakTopics, focusTopics, roundSummary, addSession, normalizeStats, topicKey,
   };
   root.Training = api;
