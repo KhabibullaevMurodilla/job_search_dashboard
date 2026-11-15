@@ -114,12 +114,23 @@
   }
   const hasAny = (p) => answered(p).length > 0;
 
-  // Appended to the cover-letter prompt. It replaces the "recite the CV" shape
-  // with one built around where the applicant is going.
-  function coverBrief(p, companyNotes) {
-    const dir = block(p, "direction"), ch = block(p, "character"), tr = traitsBlock(p);
+  // How much the letter follows the applicant's direction. "classic" is the
+  // original letter (experience and judgement), "balanced" keeps that letter and
+  // adds a statement of direction at the start and a concrete ask at the end,
+  // and "direction" builds the whole letter around where they are heading.
+  const LETTER_STYLES = [
+    { id: "classic", label: "Classic", hint: "Experience and judgement first, as before. Only your company notes are added." },
+    { id: "balanced", label: "Balanced (default)", hint: "The classic letter, plus a line at the start on where you are heading and a concrete ask at the end. Your character shapes the voice." },
+    { id: "direction", label: "Direction-led", hint: "The whole letter is built around what you are up for next, and your history is only there for credibility." },
+  ];
+  const styleOk = (m) => LETTER_STYLES.some((x) => x.id === m);
+
+  // Appended to the cover-letter prompt.
+  function coverBrief(p, companyNotes, mode) {
+    const m = styleOk(mode) ? mode : "balanced";
+    const dir = m === "classic" ? "" : block(p, "direction"), ch = m === "classic" ? "" : block(p, "character"), tr = m === "classic" ? "" : traitsBlock(p);
     const notes = str(companyNotes, 8000);
-    const scale = scaleLines(p.test);
+    const scale = m === "classic" ? [] : scaleLines(p.test);
     const parts = [];
     if (dir) parts.push("--- where the candidate is heading, in their own words ---\n" + dir);
     if (ch || tr) parts.push("--- how the candidate works and what they care about, in their own words ---\n" + ch + (tr ? "\n\nObservations the candidate has confirmed are true of them:\n" + tr : ""));
@@ -127,6 +138,17 @@
     if (notes) parts.push("--- what the candidate knows about this company (their own notes) ---\n" + notes);
     if (!parts.length) return "";
     const ch2 = ch || tr || scale.length;
+    const companyRule = "Anything about the company comes from the posting" + (notes ? " or the company notes" : "") + " and from nowhere else. Never claim to follow the company's news or products unless it is in those notes.";
+    const factsRule = "FACTS. Numbers, dates, tools and employers come from the CV, the written account or the answers above and from nowhere else. " + companyRule;
+    const voice = ch2 ? "VOICE. Use the character answers to decide tone, what to stress, and how this person reasons. Show it through how they work (what they did first, how they handled it); never state it as a claim such as \"I am a hard-working team player\". Take ideas, not wording: no six consecutive words from those answers." : "";
+    if (m === "classic") return ["", parts.join("\n\n"), "", "Keep the letter exactly as described above. The company notes only give you something specific to say about why this employer.", companyRule].join("\n");
+    if (m === "balanced") {
+      return ["", parts.join("\n\n"), "",
+        "SHAPE OF THE LETTER (a blend of two styles). Keep the classic letter described above: four or five short paragraphs led by the candidate's real experience and judgement, with evidence from the CV or account and a specific reason this employer draws them. The middle paragraphs stay evidence-led: what they have done, how they work, why this team. At least half the words must describe real work. Add only these two things:",
+        dir ? "1. Near the start, one or two sentences on where the candidate is heading and why this role fits it, taken from their direction answers. No \"I am writing to apply\"." : "1. Near the start, one or two sentences on what draws the candidate to this particular role.",
+        dir ? "2. End on the concrete thing the candidate would welcome, from their answer about help they would welcome, for example a conversation about a named problem. No pleading." : "2. End on a plain, specific invitation to talk.",
+        voice, factsRule].filter((x) => x !== "").join("\n");
+    }
     return [
       "", parts.join("\n\n"), "",
       "SHAPE OF THE LETTER (this replaces any earlier instruction about structure). Do not recite the CV. A reader should finish knowing what the candidate is up for next, and not only where they have been. Use this order:",
@@ -135,8 +157,7 @@
       "3. Who they help: connect the kind of problem the candidate likes to take on with the problems the posting" + (notes ? " and the company notes" : "") + " describe. Be specific to this employer.",
       "4. Why this company: only from the posting" + (notes ? " and the company notes" : "") + ". If there is nothing specific, say less. Never flatter, and never claim to follow the company's news or products unless it is in those notes.",
       dir ? "5. Close: the concrete thing the candidate would welcome, from their answer about help they would welcome, for example a conversation about a named problem." : "5. Close: a plain, specific invitation to talk, no pleading.",
-      ch2 ? "VOICE. Use the character answers to decide tone, what to stress, and how this person reasons. Show it through how they work (what they did first, how they handled it); never state it as a claim such as \"I am a hard-working team player\". Take ideas, not wording: no six consecutive words from those answers." : "",
-      "FACTS. Numbers, dates, tools and employers come from the CV, the written account or the answers above and from nowhere else. Anything about the company comes from the posting" + (notes ? " or the company notes" : "") + " and from nowhere else.",
+      voice, factsRule,
     ].filter((x) => x !== "").join("\n");
   }
 
@@ -173,7 +194,7 @@
     return out.slice(0, 8);
   }
 
-  const api = { ITEMS, DIMS, SCALE, scoreScale, scaleDone, scaleCount, scaleLines, writtenBy, QUESTIONS, MIN_WORDS, empty, normalize, answered, progress, corpus, block, traitsBlock, hasAny, coverBrief, buildMirrorPrompt, parseMirror };
+  const api = { LETTER_STYLES, ITEMS, DIMS, SCALE, scoreScale, scaleDone, scaleCount, scaleLines, writtenBy, QUESTIONS, MIN_WORDS, empty, normalize, answered, progress, corpus, block, traitsBlock, hasAny, coverBrief, buildMirrorPrompt, parseMirror };
   root.Profile = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : globalThis);
