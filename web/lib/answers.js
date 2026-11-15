@@ -40,6 +40,7 @@
       "--- the candidate's CV ---\n" + (o.cv || ""),
       o.story ? "\n--- the candidate's own written account of their background ---\n" + o.story.slice(0, 40000) : "",
       o.profile ? "\n--- the candidate's own answers about their direction and how they work ---\n" + o.profile.slice(0, 12000) + "\nUse these for tone, motivation and where the candidate is heading. Take ideas, not wording." : "",
+      o.research ? "\n--- the candidate's own research (digest of their theses; use only where the question asks about their research or skills) ---\n" + o.research.slice(0, 8000) + "\nNumbers only as given here. Never claim an item marked shared or others' work as theirs alone." : "",
       o.companyNotes ? "\n--- what the candidate knows about this company (their own notes) ---\n" + o.companyNotes.slice(0, 8000) : "",
       "",
       GUIDE[kind],
