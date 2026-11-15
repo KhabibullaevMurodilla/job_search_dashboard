@@ -637,6 +637,9 @@ copied from the account either. Write in a professional register.`;
     if (state.openApps.has(app.id)) d.setAttribute("open", "");
     d.addEventListener("toggle", () => { if (d.open) state.openApps.add(app.id); else state.openApps.delete(app.id); });
 
+    const olChip = el("span", { class: "chip" });
+    const renderChip = () => { const r = outlookFor("job", app); olChip.textContent = "Outlook: " + (r && r.ok ? r.bandLabel : "?"); };
+    renderChip();
     d.appendChild(el("summary", {}, [
       el("div", {}, [
         el("div", { class: "app-title", text: app.title }),
@@ -645,6 +648,7 @@ copied from the account either. Write in a professional register.`;
       el("div", { class: "role-chips", style: "margin:0" }, [
         el("span", { class: `pill st-${app.status}`, text: app.status }),
         el("span", { class: `chip ${tierClass(app.fitPct)}`, text: `CV fit ${app.fitPct == null ? "?" : app.fitPct + "%"}` }),
+        olChip,
       ]),
     ]));
 
@@ -673,6 +677,11 @@ copied from the account either. Write in a professional register.`;
     notes.value = app.notes || "";
     notes.addEventListener("change", () => { app.notes = notes.value; app.updatedAt = new Date().toISOString(); saveApps(); });
     body.appendChild(el("div", {}, [el("h4", { text: "Notes" }), notes]));
+
+    const olSlot = el("div", {});
+    const drawOutlook = () => { olSlot.textContent = ""; olSlot.appendChild(outlookPanel("job", app, () => { drawOutlook(); renderChip(); })); };
+    drawOutlook();
+    body.appendChild(olSlot);
 
     const cn = el("textarea", { "aria-label": "What you know about this company", placeholder: "Paste what you know: their About page, mission, recent news, a product launch, something a person there said. The cover letter and answers may use this and the posting, and nothing else, so it can be specific without guessing." });
     cn.value = app.companyNotes || "";
@@ -1508,6 +1517,8 @@ copied from the account either. Write in a professional register.`;
       el("span", { class: "meter", role: "img", "aria-label": `${r.pct}% of the checklist ticked` }, [el("i", { style: `width:${r.pct}%` })]),
       document.createTextNode(`${r.done}/${r.total}`),
     ]));
+    const olr = outlookFor("phd", p);
+    chips.push(el("span", { class: "chip", text: "Outlook: " + (olr && olr.ok ? olr.bandLabel : "?") }));
     d.appendChild(el("summary", {}, [
       el("div", {}, [
         el("div", { class: "app-title", text: p.programme }),
@@ -1647,6 +1658,7 @@ copied from the account either. Write in a professional register.`;
     notes.value = p.notes || "";
     notes.addEventListener("change", () => { p.notes = notes.value; touch(); });
     body.appendChild(el("div", {}, [el("h4", { text: "Notes" }), notes]));
+    body.appendChild(outlookPanel("phd", p, () => {}));
 
     const docs = el("div", {}, [el("h4", { text: "Documents for this application" })]);
     for (const doc of p.docs) {
@@ -1907,6 +1919,44 @@ copied from the account either. Write in a professional register.`;
     });
     rq("rs-add-paste").addEventListener("click", async () => { const t = rq("rs-paste").value; if (!t.trim()) { rsMsg("Paste the text first."); return; } await rsAddText(t, "pasted text"); if (!/^Done/.test(rq("rs-msg").textContent)) return; rq("rs-paste").value = ""; });
     renderResearch();
+  }
+
+
+  // ---------------------------------------------------------------- Response outlook
+  const OL = self.Outlook;
+  function researchDocCount() { return self.Research ? self.Research.usable(state.research).length : 0; }
+  function phdFit(p) { try { return p.advert && state.cvText ? SC.cvFit(state.cvText, p.advert, p.programme || "").percent : null; } catch (e) { return null; } }
+  function outlookFor(kind, rec) {
+    if (!OL) return null;
+    return kind === "job" ? OL.scoreJob(rec, { cvText: state.cvText }) : OL.scorePhd(rec, { fitPct: phdFit(rec), researchDocs: researchDocCount() });
+  }
+  function historyLine() {
+    if (!OL) return null;
+    const h = OL.history(state.apps, state.phd);
+    if (!h.n) return null;
+    if (!h.enough) return el("div", { class: "small", text: `Your own reply rate will show here once you have 8 applications that are three weeks old or have had a reply (${h.n} so far).` });
+    return el("div", { class: "small", text: `From your own record: of ${h.n} applications three weeks old or answered, ${h.heard} got any reply (${h.replyRate}%) and ${h.positive} an interview or offer (${h.positiveRate}%). Ghosting counts as no reply.` });
+  }
+  function outlookPanel(kind, rec, onChange) {
+    const box = el("div", { class: "tr-card", id: "ol-" + rec.id });
+    box.appendChild(el("h4", { text: "Response outlook" }));
+    if (kind === "job") {
+      const cb = el("input", { type: "checkbox", id: "ol-ref-" + rec.id, "aria-label": "I have a referral or know someone there" });
+      cb.checked = !!rec.referral;
+      cb.addEventListener("change", () => { rec.referral = cb.checked; rec.updatedAt = new Date().toISOString(); saveApps(); onChange(); });
+      box.appendChild(el("div", {}, [cb, document.createTextNode(" "), el("label", { for: "ol-ref-" + rec.id, text: "I have a referral or know someone there", style: "display:inline" })]));
+    }
+    const r = outlookFor(kind, rec);
+    if (!r) { box.appendChild(el("div", { class: "small", text: "This panel needs web/lib/outlook.js." })); return box; }
+    if (!r.ok) { box.appendChild(el("p", { class: "small", text: r.reason })); for (const f of r.factors.filter((x) => x.score === null)) box.appendChild(el("div", { class: "small", text: `${f.label}: ${f.note}` })); return box; }
+    box.appendChild(el("p", {}, [el("span", { class: `tr-badge ${r.band === "strong" ? "strong" : r.band === "fair" ? "thin" : "missing"}`, text: r.bandLabel }), document.createTextNode(` ${r.score} of 100. `), el("span", { class: "small", text: "An index built from what can be seen, not a probability. No one can see the employer's pipeline." })]));
+    for (const f of r.factors) {
+      box.appendChild(el("div", { class: "small", style: "max-width:560px;margin-top:6px" }, [el("strong", { text: `${f.label}${f.score === null ? "" : ": " + f.score}` }), document.createTextNode(` ${f.note}`), f.score === null ? null : el("div", { class: "tr-bar" }, [el("i", { style: `width:${f.score}%` })])].filter(Boolean)));
+    }
+    if (r.capNotes.length) box.appendChild(el("div", { class: "note", text: r.capNotes.join(" ") }));
+    if (r.helps.length) { box.appendChild(el("h5", { text: "Worth doing first" })); box.appendChild(el("ul", {}, r.helps.map((h) => el("li", { text: h })))); }
+    const hl = historyLine(); if (hl) box.appendChild(hl);
+    return box;
   }
 
   // ---------------------------------------------------------------- About me
