@@ -381,6 +381,18 @@
         <label for="ph-oakey">OpenAlex key (optional, free)</label>
         <input type="text" id="ph-oakey" placeholder="only needed if the free daily search allowance runs out">
       </details>
+      <details class="add" id="rs-box">
+        <summary>My research (theses and reports)</summary>
+        <p class="small" style="max-width:64ch">Add your own thesis, dissertation or research report as a PDF (or paste its text). The text is read in your browser and kept in memory only. What is saved is a short digest in which every statement is tied to a quote that is really in the document, so proposals, statements, letters and practice questions can say what you studied and found without guessing. The text of the document goes to Gemini once, with your own key, to make the digest. If a thesis is under embargo, or your university or a company restricts sharing it, check that first.</p>
+        <div class="row">
+          <select id="rs-kind" aria-label="What kind of document"></select>
+          <input type="file" id="rs-file" accept=".pdf,.txt,.md" aria-label="Add a thesis or report as a PDF">
+        </div>
+        <textarea id="rs-paste" aria-label="Or paste the text of the document" placeholder="Or paste the text of the document here (at least 1,500 words)."></textarea>
+        <div class="row"><button class="btn" id="rs-add-paste">Read pasted text</button></div>
+        <div id="rs-msg" class="note" role="status"></div>
+        <div id="rs-list"></div>
+      </details>
       <details class="add" id="ph-advert-box" open>
         <summary>Start from an advert</summary>
         <p class="small" style="max-width:62ch">Paste a PhD advert. You get a CV match and a list of what the advert does and does not say straight away. With your Gemini key it also reads out the university, theme, supervisor, funding and deadline, so you can add the programme in one click and then prepare its whole application pack.</p>
@@ -475,6 +487,9 @@
       <details class="pack" id="pf-box">
         <summary><strong>About me: direction and character</strong> (makes letters and answers sound like you)</summary>
         <p class="small" style="max-width:66ch">Answer in your own words, in the way you would say it to a colleague. The first four say where you are going, so a letter can say what you are up for next and not only where you have been. The rest show how you work. Nothing here is scored or sent anywhere except to Gemini with your own key when you ask for a draft. It stays in this browser. Save as you go: each box saves itself.</p>
+        <label for="pf-letter-style" style="margin-top:8px">Cover letter style</label>
+        <select id="pf-letter-style" aria-describedby="pf-letter-hint"></select>
+        <div id="pf-letter-hint" class="small" style="max-width:64ch"></div>
         <div id="pf-progress" class="small" role="status"></div>
         <div id="pf-questions"></div>
         <details class="add" id="pf-scale-box">
@@ -556,6 +571,7 @@
 <script src="./lib/proposal.js"></script>
 <script src="./lib/answers.js"></script>
 <script src="./lib/profile.js"></script>
+  <script src="./lib/research.js"></script>
   <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
