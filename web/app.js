@@ -30,6 +30,8 @@
     geminiKey: "jr_gemini_key",
     status: "jr_role_status",     // {uid: "applied"|"skipped"}
     apps: "jr_applications",      // [application records, see lib/applications.js]
+    research: "jr_research",       // array: digests of the applicant's own theses and reports
+    letterStyle: "jr_letter_style", // "classic" | "balanced" | "direction"
     profile: "jr_profile",        // object: direction and character answers, in their own words
     style: "jr_style_samples",    // string: the applicant's own writing, to match their voice
     oaKey: "jr_openalex_key",     // string: optional free OpenAlex key
@@ -70,6 +72,7 @@
     phd: self.Phd.normalizeAll(lsGet(LS.phd, [])),
     styleText: lsGet(LS.style, ""),
     profile: self.Profile ? self.Profile.normalize(lsGet(LS.profile, {})) : null,
+    research: self.Research ? self.Research.normalizeWorks(lsGet(LS.research, [])) : [],
     train: (self.Training ? self.Training.normalizeStats(lsGet(LS.train, {})) : { topics: {}, sessions: [], readiness: {} }),
     phFilter: "all", phSearch: "", openPhd: new Set(), busy: new Set(),
     tab: "roles",
@@ -224,12 +227,14 @@ copied from the account either. Write in a professional register.`;
     }
     const PFL = self.Profile;
     const pf = PFL && state.profile ? state.profile : null;
-    const brief = PFL && pf ? PFL.coverBrief(pf, app.companyNotes) : "";
+    const brief = PFL && pf ? PFL.coverBrief(pf, app.companyNotes, letterStyle()) : "";
     if (brief) prompt += brief;
+    const rbl = researchBlock();
+    if (rbl) prompt += "\n\n--- the candidate's own research (digest of their theses) ---\n" + rbl + "\n" + RS.rules() + " Mention it only if the role involves research, analysis or modelling, or it clearly supports the role, and then in a clause or two.";
     const draft = await callGemini(prompt);
     const q = DC.qualityCheckCoverLetter(draft, state.cvText);
-    const own = brief ? PFL.corpus(pf) : "";
-    if (brief) {
+    const own = brief && letterStyle() !== "classic" ? PFL.corpus(pf) : "";
+    if (brief && own) {
       const copiedOwn = DC.sharedNgram(draft, own, 6);
       if (copiedOwn) { q.problems.push(`shares "${copiedOwn}" with your own answers word-for-word`); q.ok = false; }
     }
@@ -237,8 +242,8 @@ copied from the account either. Write in a professional register.`;
       const copied = DC.sharedNgram(draft, story, 6);
       if (copied) { q.problems.push(`shares "${copied}" with your written account word-for-word`); q.ok = false; }
     }
-    if (hasStory || brief) {
-      const nums = PR.numberCheck(draft, state.cvText + "\n" + story + "\n" + own + "\n" + (app.companyNotes || "") + "\n" + (app.description || ""));
+    if (hasStory || brief || rbl) {
+      const nums = PR.numberCheck(draft, state.cvText + "\n" + story + "\n" + own + "\n" + (app.companyNotes || "") + "\n" + (app.description || "") + "\n" + researchCorpus());
       if (nums.length) { q.problems.push(`these figures are not in your CV, your account, your answers or the posting, so check them: ${nums.join(", ")}`); q.ok = false; }
     }
     app.coverLetter = draft;
@@ -359,10 +364,21 @@ copied from the account either. Write in a professional register.`;
   }
 
   // ------------------------------------------------------------- modal
+  // How far the cover letter follows the About me answers. Shared by every letter.
+  function letterStyle() { const v = lsGet(LS.letterStyle, "balanced"); return self.Profile && self.Profile.LETTER_STYLES.some((x) => x.id === v) ? v : "balanced"; }
+  function setLetterStyle(v) { lsSet(LS.letterStyle, v); const pf = document.getElementById("pf-letter-style"); if (pf && pf.value !== v) pf.value = v; syncLetterHint(); }
+  function syncLetterHint() { const h = document.getElementById("pf-letter-hint"); if (h && self.Profile) { const s = self.Profile.LETTER_STYLES.find((x) => x.id === letterStyle()); h.textContent = s ? s.hint : ""; } }
+
   function letterActions(app) {
     const actions = el("div", { class: "modal-actions" });
     actions.appendChild(el("button", { class: "btn", onclick: () => copyText(app.coverLetter), text: "Copy" }));
     actions.appendChild(el("button", { class: "btn", onclick: () => downloadText(app.coverLetter, `cover-letter-${A.slug(app.company)}-${A.slug(app.title)}.md`), text: "Download .md" }));
+    if (self.Profile) {
+      const sel = el("select", { id: "letter-style-modal", "aria-label": "Letter style for the next redraft" }, self.Profile.LETTER_STYLES.map((x) => el("option", { value: x.id, text: x.label })));
+      sel.value = letterStyle(); sel.addEventListener("change", () => setLetterStyle(sel.value));
+      actions.appendChild(el("label", { for: "letter-style-modal", class: "small", text: "Style for redraft:" }));
+      actions.appendChild(sel);
+    }
     actions.appendChild(el("button", { class: "btn", onclick: () => openLetterModal(app, true), text: "Redraft" }));
     return actions;
   }
@@ -747,6 +763,7 @@ copied from the account either. Write in a professional register.`;
         posting, cv: state.cvText, story, styleText: st ? PR.describeStyle(st) : "",
         profile: self.Profile && state.profile && self.Profile.hasAny(state.profile) ? [self.Profile.block(state.profile), self.Profile.traitsBlock(state.profile)].filter(Boolean).join("\n\n") : "",
         companyNotes: app ? (app.companyNotes || "") : "",
+        research: researchBlock(),
       };
       msg.textContent = "Writing from your CV" + (story ? " and your background" : "") + "…";
       const raw = await callGemini(AN.buildAnswerPrompt(o));
@@ -890,7 +907,10 @@ copied from the account either. Write in a professional register.`;
       review: () => PH.buildProposalReviewPrompt(p, state.cvText),
       statement: () => {
         const st = myStyle();
-        return PH.buildStatementPrompt(p, state.cvText, myName(), st ? { story: state.styleText, styleText: PR.describeStyle(st), excerpts: PR.styleExcerpts(state.styleText, 3, 130) } : null);
+        const rb = researchBlock({ passages: true });
+        const ex = st ? { story: state.styleText, styleText: PR.describeStyle(st), excerpts: PR.styleExcerpts(state.styleText, 3, 130) } : {};
+        if (rb) ex.research = rb;
+        return PH.buildStatementPrompt(p, state.cvText, myName(), st || rb ? ex : null);
       },
       tailor: () => PH.buildTailorProposalPrompt(p, state.cvText),
     }[kind]();
@@ -903,7 +923,7 @@ copied from the account either. Write in a professional register.`;
     } else if (kind === "statement") {
       p.statement = text;
       const q = PH.qualityCheckStatement(text, state.cvText, DC.sharedNgram);
-      const nums = PR.numberCheck(text, [state.cvText, state.styleText, p.proposal, p.advert].join("\n"));
+      const nums = PR.numberCheck(text, [state.cvText, state.styleText, p.proposal, p.advert, researchCorpus()].join("\n"));
       if (nums.length) q.problems.push(`These figures are not in your CV or your own account, so check them: ${nums.join(", ")}.`);
       note = q.problems.length ? "Personal statement drafted, but check: " + q.problems.join(" ") : `Personal statement drafted (${q.words} words).`;
     } else if (kind === "tailor") {
@@ -1181,8 +1201,8 @@ copied from the account either. Write in a professional register.`;
     try {
       if (!myStyle()) throw new Error(`Load your own written account first (the "Your writing and background" box above, at least ${PR.MIN_STYLE_WORDS} words). The directions are drawn from what you have actually done, so they need it.`);
       setPhMessage("Reading your account and this advert for research directions…");
-      const text = await callGemini(PR.buildDirectionsPrompt({ programme: p, story: state.styleText, cv: state.cvText, base: p.proposal }));
-      const dirs = PR.parseDirections(text, [state.styleText, state.cvText, p.proposal].join("\n"));
+      const text = await callGemini(PR.buildDirectionsPrompt({ programme: p, story: state.styleText, cv: state.cvText, base: p.proposal, research: researchBlock() }));
+      const dirs = PR.parseDirections(text, [state.styleText, state.cvText, p.proposal, researchBlock()].join("\n"));
       p.directions = dirs; p.updatedAt = new Date().toISOString(); savePhd();
       const dropped = dirs.reduce((n, d) => n + d.unverified, 0);
       setPhMessage(`${dirs.length} direction${dirs.length === 1 ? "" : "s"} suggested. Each quote shown is copied from your own text${dropped ? ` (${dropped} quote${dropped === 1 ? "" : "s"} the AI offered could not be found in your text and were removed)` : ""}. Pick one to build the proposal from.`);
@@ -1268,8 +1288,8 @@ copied from the account either. Write in a professional register.`;
       const excerpts = PR.styleExcerpts(state.styleText, 3, 130);
 
       setPhMessage("Writing the proposal with Gemini (1 of up to 3 steps)…");
-      const facts = [state.styleText, state.cvText, p.brief, p.proposal, p.advert].join("\n");
-      let draft = await callGemini(PR.buildProposalPrompt({ programme: p, cv: state.cvText, brief: p.brief, base: p.proposal, sources, target, styleText, excerpts, story: state.styleText }));
+      const facts = [state.styleText, state.cvText, p.brief, p.proposal, p.advert, researchCorpus()].join("\n");
+      let draft = await callGemini(PR.buildProposalPrompt({ programme: p, cv: state.cvText, brief: p.brief, base: p.proposal, sources, target, styleText, excerpts, story: state.styleText, research: researchBlock({ passages: true }) }));
       let report = PR.checkDraft(draft, sources, style, target, facts);
       let best = { draft, report }, passes = 0;
       while (best.report.problems.length && passes < 2) {
@@ -1817,6 +1837,78 @@ copied from the account either. Write in a professional register.`;
   });
 
 
+
+  // ---------------------------------------------------------------- My research
+  const RS = self.Research;
+  const researchTexts = new Map();            // full text, memory only
+  const rq = (id) => document.getElementById(id);
+  const saveResearch = () => lsSet(LS.research, state.research);
+  const researchBlock = (opts) => (RS && state.research.length ? RS.block(state.research, opts) : "");
+  const researchCorpus = () => (RS && state.research.length ? RS.corpus(state.research) : "");
+  const rsMsg = (t) => { const m = rq("rs-msg"); if (m) m.textContent = t || ""; };
+
+  async function rsAddText(rawText, fileName) {
+    try {
+      if (!RS) throw new Error("This box needs web/lib/research.js.");
+      if (!lsGet(LS.geminiKey, "")) throw new Error("Add your Gemini key first (top of the page). The digest is written by Gemini and then checked against the text.");
+      if (state.research.length >= RS.MAX_WORKS) throw new Error(`You can keep ${RS.MAX_WORKS} documents. Delete one first.`);
+      const text = PR.cleanPaperText(rawText);
+      const words = RS.wordCount(text);
+      if (words < RS.MIN_WORDS) throw new Error(`Only ${words.toLocaleString()} words could be read. A thesis or report needs at least ${RS.MIN_WORDS.toLocaleString()}. If the PDF is a scan with no selectable text, paste the text instead.`);
+      const kind = rq("rs-kind").value;
+      rsMsg(`Reading ${words.toLocaleString()} words and writing a digest…`);
+      const raw = await callGemini(RS.buildDigestPrompt({ kind, text }));
+      const d = RS.parseDigest(raw, text);
+      if (!d) throw new Error("The digest could not be read. Try again.");
+      if (!d.ok) throw new Error(d.reason + " Nothing was saved. Try again, or paste the main chapters only.");
+      const id = "r" + Date.now().toString(36);
+      const w = { id, title: d.title || (fileName || "Untitled").replace(/\.[a-z0-9]+$/i, ""), kind, year: d.year, file: fileName || "pasted text", words, summary: d.summary, mineNote: "", passages: RS.keyPassages(text, 4000), items: d.items, at: new Date().toISOString() };
+      researchTexts.set(id, text);
+      state.research.push(w); saveResearch();
+      rsMsg(`Done: ${d.items.length} statements, each tied to a quote from the document${d.dropped ? ` (${d.dropped} the AI offered could not be found in it and were dropped)` : ""}. Untick any that are wrong, mark what was shared, and say what was your own.`);
+      renderResearch();
+    } catch (e) { rsMsg(e.message || String(e)); }
+  }
+
+  function renderResearch() {
+    const list = rq("rs-list"); if (!list) return; list.textContent = "";
+    for (const w of state.research) {
+      const card = el("div", { class: "tr-card" });
+      card.appendChild(el("h4", { text: `${w.title} (${w.kind}${w.year ? ", " + w.year : ""})` }));
+      card.appendChild(el("div", { class: "small", text: `${w.file}, ${w.words.toLocaleString()} words. ${w.items.filter((i) => i.keep).length} of ${w.items.length} statements in use.` }));
+      if (w.summary) card.appendChild(el("p", { text: w.summary }));
+      w.items.forEach((it, i) => {
+        const cb = el("input", { type: "checkbox", id: `rs-k-${w.id}-${i}`, "aria-label": "Use: " + it.text });
+        cb.checked = it.keep; cb.addEventListener("change", () => { it.keep = cb.checked; saveResearch(); renderResearch(); });
+        const mine = el("select", { "aria-label": "Whose work: " + it.text }, [el("option", { value: "1", text: "my own work" }), el("option", { value: "0", text: "shared or others'" })]);
+        mine.value = it.mine ? "1" : "0"; mine.addEventListener("change", () => { it.mine = mine.value === "1"; saveResearch(); });
+        card.appendChild(el("div", { class: "tr-req" }, [el("div", {}, [cb, document.createTextNode(" "), el("span", { class: "tr-badge thin", text: it.kind }), document.createTextNode(" "), el("strong", { text: it.text }), document.createTextNode(" "), mine]), el("div", { class: "small", text: "From the document: “" + it.quote + "”" })]));
+      });
+      const note = el("textarea", { id: "rs-note-" + w.id, "aria-label": "What was your own in this work", placeholder: "What exactly was yours? What did a supervisor, co-author or team do, and what data or tools were provided to you? One or two sentences, in your words." });
+      note.value = w.mineNote || "";
+      note.addEventListener("change", () => { w.mineNote = note.value.trim().slice(0, 1500); saveResearch(); });
+      card.appendChild(el("label", { for: "rs-note-" + w.id, text: "What was your own, and what was shared", style: "margin-top:8px" })); card.appendChild(note);
+      card.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", text: "Delete this document", onclick: () => { if (!window.confirm("Delete this digest? The document itself is not stored.")) return; state.research = state.research.filter((x) => x.id !== w.id); researchTexts.delete(w.id); saveResearch(); renderResearch(); } })]));
+      list.appendChild(card);
+    }
+  }
+
+  function wireResearch() {
+    if (!rq("rs-box")) return;
+    if (!RS) { rsMsg("This box needs web/lib/research.js. Add it next to the other files in web/lib/, push, and refresh."); return; }
+    const sel = rq("rs-kind"); RS.KINDS.forEach((k) => sel.appendChild(el("option", { value: k, text: k })));
+    rq("rs-file").addEventListener("change", async (e) => {
+      const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
+      try {
+        rsMsg(`Reading ${f.name}…`);
+        const raw = /\.pdf$/i.test(f.name) ? await extractPdfText(await f.arrayBuffer()) : await f.text();
+        await rsAddText(raw, f.name);
+      } catch (err) { rsMsg(err.message || String(err)); }
+    });
+    rq("rs-add-paste").addEventListener("click", async () => { const t = rq("rs-paste").value; if (!t.trim()) { rsMsg("Paste the text first."); return; } await rsAddText(t, "pasted text"); if (!/^Done/.test(rq("rs-msg").textContent)) return; rq("rs-paste").value = ""; });
+    renderResearch();
+  }
+
   // ---------------------------------------------------------------- About me
   const PF = self.Profile;
   const pq = (id) => document.getElementById(id);
@@ -1837,6 +1929,10 @@ copied from the account either. Write in a professional register.`;
         qs.appendChild(ta);
       }
     }
+    const ls = pq("pf-letter-style");
+    if (ls && !ls.options.length) { PF.LETTER_STYLES.forEach((x) => ls.appendChild(el("option", { value: x.id, text: x.label }))); ls.addEventListener("change", () => setLetterStyle(ls.value)); }
+    if (ls) ls.value = letterStyle();
+    syncLetterHint();
     renderProfileProgress(); renderTraits(); renderScale();
   }
   function renderProfileProgress() {
@@ -1914,8 +2010,8 @@ copied from the account either. Write in a professional register.`;
   const tq = (id) => document.getElementById(id);
   const saveTrain = () => lsSet(LS.train, state.train);
   const trMsg = (t) => { tq("tr-msg").textContent = t; };
-  const trStory = () => ((state.styleText || "").trim().split(/\s+/).length >= 150 ? state.styleText.trim() : "");
-  const trFacts = () => [state.cvText, state.styleText].join("\n");
+  const trStory = () => [(state.styleText || "").trim().split(/\s+/).length >= 150 ? state.styleText.trim() : "", researchBlock() ? "MY OWN RESEARCH (digest of my theses):\n" + researchBlock() : ""].filter(Boolean).join("\n\n");
+  const trFacts = () => [state.cvText, state.styleText, researchCorpus()].join("\n");
 
   function trTargets() {
     const t = [];
@@ -2419,7 +2515,7 @@ copied from the account either. Write in a professional register.`;
     if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
     wireDocs();
-    wireTrain(); wireProfile();
+    wireTrain(); wireProfile(); wireResearch();
     document.getElementById("aq-go").addEventListener("click", aqWrite);
     document.getElementById("aq-role").addEventListener("change", aqFill);
     loadData();
