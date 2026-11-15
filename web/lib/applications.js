@@ -50,6 +50,8 @@
       coverLetter: "",
       notes: "",
       companyNotes: "",
+      referral: false,
+      postedAt: typeof (f.postedAt || f.posted_at) === "string" ? (f.postedAt || f.posted_at) : "",
       docs: [],
     };
   }
