@@ -254,6 +254,15 @@
   .tr-bar { height: 8px; background: rgba(0,0,0,.1); margin-top: 3px; }
   .tr-bar > i { display: block; height: 8px; background: var(--carbon); }
   .tr-opt { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; font-size: 13px; }
+  .lg-q { font-size: 22px; font-weight: 700; margin: 6px 0; }
+  .lg-key { font-size: 26px; font-weight: 700; margin: 4px 0; }
+  .lg-star { letter-spacing: 2px; }
+  .lg-chip { display: inline-block; border: 1px solid var(--carbon); padding: 1px 8px; margin: 2px 6px 2px 0; font-size: 12px; }
+  .lg-chip.off { border-style: dashed; opacity: .55; }
+  .lg-word { display: inline-block; border: 1px solid var(--carbon); padding: 6px 10px; margin: 4px 6px 4px 0; background: transparent; font: inherit; cursor: pointer; }
+  .lg-word[aria-pressed="true"] { background: var(--carbon); color: var(--paper, #fff); }
+  .lg-good { border-left: 4px solid var(--carbon); padding: 6px 10px; margin: 8px 0; font-weight: 700; }
+  .lg-bad { border-left: 4px dashed var(--carbon); padding: 6px 10px; margin: 8px 0; font-weight: 700; }
   .doc-list { list-style: none; padding: 0; margin: 8px 0; max-width: 760px; }
   .doc-list li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--carbon); font-size: 12.5px; flex-wrap: wrap; }
   .doc-list .nm { flex: 1; min-width: 160px; word-break: break-word; }
@@ -284,6 +293,7 @@
   <button role="tab" id="tab-apps" data-tab="apps" aria-selected="false">My applications</button>
   <button role="tab" id="tab-phd" data-tab="phd" aria-selected="false">PhD applications</button>
   <button role="tab" id="tab-train" data-tab="train" aria-selected="false">Training ground</button>
+  <button role="tab" id="tab-lang" data-tab="lang" aria-selected="false">Languages</button>
   <button role="tab" id="tab-docs" data-tab="docs" aria-selected="false">Merge &amp; split PDFs</button>
 </div>
 <div class="layout">
@@ -421,6 +431,28 @@
       <div id="ph-message" class="small" role="status"></div>
       <div id="ph-dashboard"></div>
       <div id="ph-list"></div>
+    </section>
+
+    <section id="view-lang" role="tabpanel" aria-labelledby="tab-lang" hidden>
+      <p class="small" style="max-width:70ch">Learn any language, from whatever language you already speak. Pick the language and what you want it for, and a course is written for you: short units of useful words and phrases with example sentences, then exercises (choosing, typing, listening, putting words in order, speaking) that earn XP, build a streak and bring words back just before you would forget them. Everything is saved in this browser. The course is written by AI, so it can contain mistakes, especially for less common languages: every unit is reviewed by a second pass, each item has a "this is wrong" button, and a word you report is removed for good. The screen itself is in English; the lessons are in the languages you choose.</p>
+      <div id="lg-stats" class="pack" role="status" aria-live="polite"></div>
+      <details class="add" id="lg-new" open>
+        <summary>Start a new course</summary>
+        <div class="row">
+          <div><label for="lg-learn">I want to learn</label><input id="lg-learn" type="text" placeholder="for example Uzbek, German, Japanese, Arabic" autocomplete="off"></div>
+          <div><label for="lg-from">My language</label><input id="lg-from" type="text" value="English" autocomplete="off"></div>
+        </div>
+        <div class="row">
+          <div><label for="lg-level">Where I am</label><select id="lg-level"></select></div>
+          <div><label for="lg-goal">What I want it for</label><select id="lg-goal"></select></div>
+        </div>
+        <label for="lg-extra">Anything else (optional)</label>
+        <input id="lg-extra" type="text" placeholder="for example: the dialect of Tashkent, or words for network engineering" autocomplete="off">
+        <div class="row"><button class="btn" id="lg-create">Write my course</button></div>
+      </details>
+      <div id="lg-msg" class="note" role="status"></div>
+      <div id="lg-course"></div>
+      <div id="lg-stage"></div>
     </section>
 
     <section id="view-train" role="tabpanel" aria-labelledby="tab-train" hidden>
@@ -573,6 +605,7 @@
 <script src="./lib/profile.js"></script>
   <script src="./lib/research.js"></script>
   <script src="./lib/outlook.js"></script>
+  <script src="./lib/lang.js"></script>
   <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
