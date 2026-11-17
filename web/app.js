@@ -31,6 +31,7 @@
     status: "jr_role_status",     // {uid: "applied"|"skipped"}
     apps: "jr_applications",      // [application records, see lib/applications.js]
     research: "jr_research",       // array: digests of the applicant's own theses and reports
+    lang: "jr_lang",               // object: language courses, XP, streak, badges
     letterStyle: "jr_letter_style", // "classic" | "balanced" | "direction"
     profile: "jr_profile",        // object: direction and character answers, in their own words
     style: "jr_style_samples",    // string: the applicant's own writing, to match their voice
@@ -73,6 +74,7 @@
     styleText: lsGet(LS.style, ""),
     profile: self.Profile ? self.Profile.normalize(lsGet(LS.profile, {})) : null,
     research: self.Research ? self.Research.normalizeWorks(lsGet(LS.research, [])) : [],
+    lang: self.Lang ? self.Lang.normalizeState(lsGet(LS.lang, {})) : null,
     train: (self.Training ? self.Training.normalizeStats(lsGet(LS.train, {})) : { topics: {}, sessions: [], readiness: {} }),
     phFilter: "all", phSearch: "", openPhd: new Set(), busy: new Set(),
     tab: "roles",
@@ -256,6 +258,7 @@ copied from the account either. Write in a professional register.`;
   function el(tag, attrs, children) {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === undefined || v === null || v === false) continue;
       if (k === "text") node.textContent = v;
       else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
       else node.setAttribute(k, v);
@@ -478,7 +481,7 @@ copied from the account either. Write in a professional register.`;
     for (const b of document.querySelectorAll("#tabs [data-tab]")) {
       b.setAttribute("aria-selected", b.dataset.tab === name ? "true" : "false");
     }
-    for (const t of ["roles", "score", "apps", "phd", "train", "docs"]) {
+    for (const t of ["roles", "score", "apps", "phd", "train", "docs", "lang"]) {
       document.getElementById("view-" + t).hidden = t !== name;
     }
     document.getElementById("panel-filters").hidden = name !== "roles";
@@ -486,6 +489,7 @@ copied from the account either. Write in a professional register.`;
     if (name === "phd") renderPhd();
     if (name === "docs") renderDocs();
     if (name === "train") renderTrain();
+    if (name === "lang") renderLang();
   }
 
   // ------------------------------------------------- score a posting
@@ -2052,6 +2056,305 @@ copied from the account either. Write in a professional register.`;
     renderProfile();
   }
 
+
+  // ---------------------------------------------------------------- Languages
+  const LG = self.Lang;
+  const lg = (id) => document.getElementById(id);
+  let run = null;               // the lesson or review in progress
+  let lgBusy = false;
+  const saveLang = () => lsSet(LS.lang, state.lang);
+  const lgMsg = (t) => { const m = lg("lg-msg"); if (m) m.textContent = t || ""; };
+  const lgCourse = () => (state.lang ? state.lang.courses.find((c) => c.id === state.lang.active) || null : null);
+  const tgt = (text, tag, cls) => el("span", { lang: tag || undefined, dir: "auto", class: cls || "", text });
+
+  function voiceFor(tag) {
+    try { if (!tag || !self.speechSynthesis || !self.SpeechSynthesisUtterance) return false; const p = tag.slice(0, 2).toLowerCase(); return (self.speechSynthesis.getVoices() || []).some((v) => String(v.lang || "").toLowerCase().startsWith(p)); } catch (e) { return false; }
+  }
+  function say(text, tag) { try { self.speechSynthesis.cancel(); const u = new self.SpeechSynthesisUtterance(text); if (tag) u.lang = tag; self.speechSynthesis.speak(u); } catch (e) { /* no voice */ } }
+  const recogClass = () => self.SpeechRecognition || self.webkitSpeechRecognition || null;
+  const hearBtn = (text, tag) => el("button", { class: "btn", type: "button", "aria-label": "Hear it: " + text, text: "Hear it", onclick: () => say(text, tag) });
+
+  function lgStatsView() {
+    const box = lg("lg-stats"); if (!box || !state.lang) return; box.textContent = "";
+    const s = state.lang.stats, today = LG.dayKey();
+    const dayXp = s.day && s.day.date === today ? s.day.xp : 0, lv = LG.levelOf(s.xp), next = LG.levelStart(lv + 1), cur = LG.levelStart(lv);
+    const learned = state.lang.courses.reduce((n, c) => n + LG.learnedCount(c.srs), 0);
+    box.appendChild(el("div", {}, [
+      el("strong", { text: `Level ${lv}.` }), document.createTextNode(` ${s.xp} XP, ${next - s.xp} to reach level ${lv + 1}.  `),
+      el("strong", { text: `${LG.streakNow(s)} day streak` }), document.createTextNode(` (best ${s.streak.best}).  ${learned} words learned.`),
+    ]));
+    box.appendChild(el("div", { class: "tr-bar", "aria-hidden": "true" }, [el("i", { style: `width:${Math.min(100, Math.round(((s.xp - cur) / (next - cur)) * 100))}%` })]));
+    const goalRow = el("div", { class: "row", style: "align-items:center;margin:8px 0 0" });
+    goalRow.appendChild(el("span", { class: "small", text: `Today: ${dayXp} of ${s.goal} XP${dayXp >= s.goal ? ". Goal reached." : ""}` }));
+    const gs = el("select", { id: "lg-goalxp", "aria-label": "Daily XP goal", style: "width:auto" }, LG.DAILY_GOALS.map((g) => el("option", { value: String(g), text: `${g} XP a day` })));
+    gs.value = String(s.goal); gs.addEventListener("change", () => { s.goal = Number(gs.value); saveLang(); lgStatsView(); });
+    goalRow.appendChild(gs);
+    box.appendChild(goalRow);
+    box.appendChild(el("div", { class: "tr-bar", "aria-hidden": "true" }, [el("i", { style: `width:${Math.min(100, Math.round((dayXp / s.goal) * 100))}%` })]));
+    const badges = el("div", { style: "margin-top:8px" });
+    for (const b of LG.BADGES) badges.appendChild(el("span", { class: "lg-chip" + (s.badges.indexOf(b.id) >= 0 ? "" : " off"), text: (s.badges.indexOf(b.id) >= 0 ? "" : "locked: ") + b.label }));
+    box.appendChild(badges);
+  }
+
+  function lgCourseView() {
+    const box = lg("lg-course"); if (!box) return; box.textContent = "";
+    const c = lgCourse();
+    lg("lg-new").open = !c;
+    if (!c) return;
+    const head = el("div", { class: "row", style: "align-items:center" });
+    if (state.lang.courses.length > 1) {
+      const pick = el("select", { id: "lg-pick", "aria-label": "Switch course", style: "width:auto" }, state.lang.courses.map((x) => el("option", { value: x.id, text: `${x.name}${x.from ? " (from " + x.from + ")" : ""}` })));
+      pick.value = c.id; pick.addEventListener("change", () => { if (run && !run.finished && !window.confirm("Leave this lesson?")) { pick.value = c.id; return; } run = null; state.lang.active = pick.value; saveLang(); renderLang(); });
+      head.appendChild(pick);
+    }
+    head.appendChild(el("button", { class: "btn", id: "lg-delete", text: "Delete this course", onclick: () => { if (!window.confirm(`Delete the ${c.name} course and its progress? Your XP and streak stay.`)) return; state.lang.courses = state.lang.courses.filter((x) => x.id !== c.id); state.lang.active = state.lang.courses[0] ? state.lang.courses[0].id : ""; run = null; saveLang(); renderLang(); } }));
+    box.appendChild(el("h3", { style: "margin:8px 0 4px" }, [tgt(c.nativeName || c.name, c.tag), document.createTextNode(`  ${c.name}, from ${c.from}`)]));
+    if (c.warning || c.confidence === "low") box.appendChild(el("div", { class: "note", text: (c.confidence === "low" ? "The AI is not confident in this language. " : "") + (c.warning || "") + " Check words against a dictionary or a speaker before relying on them." }));
+    if (!voiceFor(c.tag)) box.appendChild(el("div", { class: "small", text: "No voice for this language was found in your browser, so listening exercises are off and the Hear it buttons may be silent." }));
+    box.appendChild(head);
+    const due = LG.dueIds(c.srs).filter((id) => LG.courseItems(c).some((i) => i.id === id)).length;
+    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "lg-review", disabled: due ? undefined : "", text: due ? `Review ${due} word${due === 1 ? "" : "s"} that are due` : "No words due for review", onclick: () => lgStartReview() })]));
+    const nextUp = c.units.findIndex((u) => u.stars === 0);
+    c.units.forEach((u, i) => {
+      const done = u.stars > 0;
+      box.appendChild(el("div", { class: "tr-req", id: "lg-unit-" + i }, [
+        el("div", {}, [
+          el("span", { class: "tr-badge " + (done ? "strong" : i === nextUp ? "" : "missing"), text: done ? "done" : i === nextUp ? "next up" : "open" }),
+          el("strong", { text: `${i + 1}. ${u.title}` }), document.createTextNode(" "), el("span", { class: "lg-star", "aria-label": `${u.stars} of 3 stars`, text: "★".repeat(u.stars) + "☆".repeat(3 - u.stars) }),
+        ]),
+        el("div", { class: "small", text: u.focus + (u.items ? ` (${u.items.length} words)` : "") }),
+        el("div", { class: "row", style: "margin:4px 0 0" }, [el("button", { class: "btn", text: u.items ? (done ? "Practise again" : "Start") : "Write this unit and start", disabled: lgBusy ? "" : undefined, onclick: () => lgOpenUnit(i) })]),
+      ]));
+    });
+  }
+
+  function renderLang() { if (!state.lang) return; lgStatsView(); lgCourseView(); lgStageView(); }
+
+  async function lgCreate() {
+    if (lgBusy) return;
+    try {
+      if (!LG) throw new Error("This tab needs web/lib/lang.js. Add it next to the other files in web/lib/, push, and refresh.");
+      if (!lsGet(LS.geminiKey, "")) throw new Error("Add your Gemini key first (top of the page). The course is written by Gemini.");
+      const learn = lg("lg-learn").value.trim(), from = lg("lg-from").value.trim() || "English";
+      if (!learn) throw new Error("Type the language you want to learn.");
+      if (state.lang.courses.length >= LG.MAX_COURSES) throw new Error(`You can keep ${LG.MAX_COURSES} courses. Delete one first.`);
+      const goal = LG.GOALS.find((g) => g.id === lg("lg-goal").value), extra = lg("lg-extra").value.trim();
+      const goalText = (goal ? goal.label : "Everyday life") + (extra ? ", " + extra : "");
+      lgBusy = true; lgMsg(`Planning your ${learn} course…`);
+      const p = LG.parseCourse(await callGemini(LG.buildCoursePrompt({ learn, from, level: lg("lg-level").value, goalText, extra })));
+      if (!p) throw new Error("The course plan could not be read. Press the button again.");
+      const c = { id: "c" + Date.now().toString(36), name: p.name, nativeName: p.nativeName, tag: p.tag, script: p.script, confidence: p.confidence, warning: p.warning, from, level: lg("lg-level").value, goalText, units: p.units.map((u) => ({ title: u.title, focus: u.focus, note: "", stars: 0, items: null, dropped: 0 })), srs: {}, removed: [], reviews: 0, at: new Date().toISOString() };
+      state.lang.courses.push(c); state.lang.active = c.id; run = null; saveLang();
+      lgMsg(`Your ${p.name} course is ready: ${p.units.length} units. Start with the first.`);
+      lg("lg-learn").value = "";
+    } catch (e) { lgMsg(e.message || String(e)); }
+    lgBusy = false; renderLang();
+  }
+
+  async function lgOpenUnit(i) {
+    if (lgBusy) return;
+    const c = lgCourse(); if (!c || !c.units[i]) return;
+    if (run && !run.finished && !window.confirm("Leave the lesson you are in?")) return;
+    const u = c.units[i]; run = null;
+    if (!u.items) {
+      lgBusy = true; renderLang();
+      try {
+        if (!lsGet(LS.geminiKey, "")) throw new Error("Add your Gemini key first.");
+        lgMsg(`Writing unit ${i + 1}: ${u.title}…`);
+        const have = LG.courseItems(c).map((x) => x.id);
+        const parsed = LG.parseUnit(await callGemini(LG.buildUnitPrompt({ course: c, unit: u, known: LG.courseItems(c).map((x) => x.target) })), { removed: c.removed, have });
+        if (!parsed) throw new Error("The unit could not be read. Press Start again.");
+        if (!parsed.ok) throw new Error(parsed.reason + " Press Start again.");
+        lgMsg("Having a second reviewer check every item…");
+        let items = parsed.items, dropped = 0;
+        try {
+          const bad = LG.parseCheck(await callGemini(LG.buildCheckPrompt(c, items)), items.length);
+          if (bad) { items = items.filter((x, k) => !(k in bad)); dropped = parsed.items.length - items.length; } else u.unreviewed = true;
+        } catch (e) { /* unreviewed: shown as such */ u.unreviewed = true; }
+        if (items.length < 5) throw new Error("Too many items in that unit failed review. Press Start again for a fresh set.");
+        u.items = items; u.note = parsed.note; u.dropped = dropped; saveLang();
+        lgMsg(dropped ? `${dropped} item${dropped === 1 ? "" : "s"} failed review and ${dropped === 1 ? "was" : "were"} left out.` : "");
+      } catch (e) { lgMsg(e.message || String(e)); lgBusy = false; renderLang(); return; }
+      lgBusy = false;
+    } else lgMsg("");
+    run = { mode: "study", unit: i, c: c.id };
+    renderLang();
+    const st = lg("lg-stage"); if (st && st.scrollIntoView) { try { st.scrollIntoView({ block: "start" }); } catch (e) { /* ignore */ } }
+  }
+
+  function lgStudyView(stage, c, u) {
+    stage.appendChild(el("h3", { text: `Unit ${run.unit + 1}: ${u.title}` }));
+    if (u.note) stage.appendChild(el("p", { class: "small", style: "max-width:64ch", text: u.note }));
+    if (u.unreviewed) stage.appendChild(el("div", { class: "note", text: "The review pass could not run for this unit. Treat it with extra care." }));
+    for (const it of u.items) {
+      const card = el("div", { class: "tr-card", id: "lg-w-" + it.id });
+      card.appendChild(el("div", { class: "lg-key" }, [tgt(it.target, c.tag)]));
+      if (it.roman) card.appendChild(el("div", { class: "small", text: it.roman }));
+      card.appendChild(el("div", { text: it.meaning }));
+      if (it.example) card.appendChild(el("div", { class: "small", style: "margin-top:6px" }, [tgt(it.example.target, c.tag), document.createTextNode(` ${it.example.roman ? "(" + it.example.roman + ") " : ""}= ${it.example.meaning}`)]));
+      card.appendChild(el("div", { class: "row", style: "margin:6px 0 0" }, [hearBtn(it.target, c.tag), el("button", { class: "btn", type: "button", "aria-label": "Report as wrong: " + it.target, text: "This is wrong", onclick: () => lgReport(it.id) })]));
+      stage.appendChild(card);
+    }
+    stage.appendChild(el("div", { class: "row" }, [
+      el("button", { class: "btn", id: "lg-go", text: "Start practice", onclick: () => lgStartLesson() }),
+      el("button", { class: "btn", text: "Close", onclick: () => { run = null; renderLang(); } }),
+    ]));
+  }
+
+  function lgReport(id) {
+    const c = lgCourse(); if (!c) return;
+    if (!window.confirm("Remove this item from your course for good?")) return;
+    if (c.removed.indexOf(id) < 0) c.removed.push(id);
+    for (const u of c.units) if (u.items) u.items = u.items.filter((i) => i.id !== id);
+    delete c.srs[id]; saveLang(); lgMsg("Removed. Thank you: it will not come back.");
+    if (run && run.mode === "study") { const u = c.units[run.unit]; if (!u.items || u.items.length < 3) { run = null; } }
+    renderLang();
+  }
+
+  function lgBuildRun(c, items, mode, unitIdx) {
+    const all = LG.courseItems(c);
+    const questions = LG.buildSession(items, { n: mode === "review" ? Math.min(12, Math.max(6, items.length * 2)) : 12, pool: all, hasSpaces: LG.hasSpaces(all), canListen: voiceFor(c.tag), canSpeak: !!recogClass() && !!c.tag, name: c.name });
+    return { mode, unit: unitIdx, c: c.id, questions, i: 0, hearts: mode === "review" ? null : 3, correct: 0, wrong: 0, combo: 0, xp: 0, answered: null, finished: false, failed: false, seen: {} };
+  }
+  function lgStartLesson() {
+    const c = lgCourse(), u = c && c.units[run.unit]; if (!u || !u.items || u.items.length < 3) return;
+    run = lgBuildRun(c, u.items, "lesson", run.unit); renderLang();
+  }
+  function lgStartReview() {
+    const c = lgCourse(); if (!c) return;
+    const all = LG.courseItems(c), ids = LG.dueIds(c.srs).slice(0, 10), items = ids.map((id) => all.find((i) => i.id === id)).filter(Boolean);
+    if (items.length < 2) { lgMsg("Too few words are due. Practise a unit instead."); return; }
+    if (run && !run.finished && !window.confirm("Leave the lesson you are in?")) return;
+    run = lgBuildRun(c, items, "review", -1); renderLang();
+  }
+
+  function lgStageView() {
+    const stage = lg("lg-stage"); if (!stage) return; stage.textContent = "";
+    const c = lgCourse(); if (!c || !run || run.c !== c.id) return;
+    if (run.mode === "study") { const u = c.units[run.unit]; if (u && u.items) lgStudyView(stage, c, u); return; }
+    if (run.finished) return lgSummaryView(stage, c);
+    const q = run.questions[run.i];
+    if (!q) return;
+    const card = el("div", { class: "tr-card", id: "lg-card" });
+    card.appendChild(el("div", { class: "small", role: "status", text: `${run.mode === "review" ? "Review" : "Lesson"}: question ${run.i + 1} of ${run.questions.length}.${run.hearts === null ? "" : "  Hearts: " + "♥".repeat(run.hearts) + "♡".repeat(3 - run.hearts) + "."}  ${run.xp} XP so far.` }));
+    card.appendChild(el("div", { class: "tr-bar", "aria-hidden": "true" }, [el("i", { style: `width:${Math.round((run.i / run.questions.length) * 100)}%` })]));
+    card.appendChild(el("div", { class: "lg-q", text: q.prompt }));
+    const item = LG.courseItems(c).find((i) => i.id === q.itemId);
+    const meaningShown = q.type === "mc-target" || q.type === "type" || q.type === "order";
+    if (q.show) card.appendChild(el("div", { class: "lg-key" }, [meaningShown ? el("span", { text: q.show }) : tgt(q.show, c.tag)]));
+    if (q.roman) card.appendChild(el("div", { class: "small", text: q.roman }));
+    if (q.audio && (q.type === "listen" || q.type === "mc-meaning")) card.appendChild(el("div", { class: "row", style: "margin:4px 0" }, [hearBtn(q.audio, c.tag)]));
+    if (q.type === "listen") setTimeout(() => say(q.audio, c.tag), 50);
+    const body = el("div", { id: "lg-body" });
+    let read = () => null;
+    if (q.options) {
+      q.options.forEach((o, k) => {
+        const id = `lg-o-${run.i}-${k}`;
+        const rb = el("input", { type: "radio", name: "lg-choice", id, value: String(k) });
+        body.appendChild(el("div", { class: "tr-opt" }, [rb, el("label", { for: id }, [q.type === "mc-target" ? tgt(o, c.tag) : el("span", { text: o })])]));
+      });
+      read = () => { const r = body.querySelector('input[name="lg-choice"]:checked'); return r ? Number(r.value) : null; };
+    } else if (q.type === "type") {
+      const inp = el("input", { type: "text", id: "lg-answer", "aria-label": "Your answer", autocomplete: "off", autocapitalize: "off", spellcheck: "false", lang: c.tag || undefined, dir: "auto" });
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lgCheck(read()); } });
+      body.appendChild(inp); read = () => (inp.value.trim() ? inp.value : null);
+      if (item && item.roman) body.appendChild(el("div", { class: "small", text: "You may type the romanisation." }));
+    } else if (q.type === "order") {
+      const chosen = [], line = el("div", { id: "lg-line", class: "lg-q", "aria-label": "Your sentence", style: "min-height:34px" }), bank = el("div", {});
+      const paint = () => { line.textContent = ""; chosen.forEach((w, k) => line.appendChild(el("button", { class: "lg-word", type: "button", "aria-label": "Remove " + w, text: w, onclick: () => { chosen.splice(k, 1); paint(); } }))); bank.textContent = ""; q.bank.forEach((w, k) => bank.appendChild(el("button", { class: "lg-word", type: "button", id: `lg-b-${k}`, "aria-pressed": chosen.indexOf(k) >= 0 ? "true" : "false", disabled: chosen.indexOf(k) >= 0 ? "" : undefined, text: w, onclick: () => { chosen.push(k); paint(); } }))); };
+      chosen.length = 0; const ids = [];
+      const paint2 = () => { line.textContent = ""; ids.forEach((k, n) => line.appendChild(el("button", { class: "lg-word", type: "button", "aria-label": "Remove " + q.bank[k], text: q.bank[k], onclick: () => { ids.splice(n, 1); paint2(); } }))); bank.textContent = ""; q.bank.forEach((w, k) => { const used = ids.indexOf(k) >= 0; bank.appendChild(el("button", { class: "lg-word", type: "button", "aria-pressed": used ? "true" : "false", disabled: used ? "" : undefined, text: w, onclick: () => { ids.push(k); paint2(); } })); }); };
+      paint2(); body.appendChild(line); body.appendChild(bank);
+      read = () => (ids.length ? ids.map((k) => q.bank[k]) : null);
+    } else if (q.type === "speak") {
+      const RC = recogClass();
+      body.appendChild(el("div", { class: "small", text: q.meaning ? "It means: " + q.meaning : "" }));
+      const out = el("div", { id: "lg-heard", class: "small", "aria-live": "polite" });
+      const btn = el("button", { class: "btn", id: "lg-mic", type: "button", text: "Speak now", onclick: () => {
+        try { const r = new RC(); r.lang = c.tag; r.interimResults = false; r.maxAlternatives = 3; r.onresult = (e) => { const t = (e.results[0][0] || {}).transcript || ""; out.textContent = "Heard: " + t; lgCheck(t); }; r.onerror = () => { out.textContent = "Could not hear you. Try again or skip."; }; r.start(); out.textContent = "Listening…"; } catch (e) { out.textContent = "Speech recognition is not available here. Skip this one."; }
+      } });
+      body.appendChild(btn); body.appendChild(out);
+      body.appendChild(el("button", { class: "btn", id: "lg-skip", type: "button", text: "Skip (no penalty)", onclick: () => lgSkip() }));
+    }
+    card.appendChild(body);
+    if (q.type !== "speak") card.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "lg-check", text: "Check", onclick: () => lgCheck(read()) })]));
+    stage.appendChild(card);
+    stage.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", text: "Leave this lesson", onclick: () => { if (!window.confirm("Leave? Your answers so far are kept.")) return; run = null; saveLang(); renderLang(); } })]));
+    const first = card.querySelector("#lg-answer, input[type=radio]"); if (first && first.focus) first.focus();
+  }
+
+  function lgCheck(response) {
+    const c = lgCourse(); if (!c || !run || run.finished || run.answered) return;
+    if (response === null || response === undefined || response === "") { lgMsg("Choose or type an answer first."); return; }
+    lgMsg("");
+    const q = run.questions[run.i], g = LG.gradeQuestion(q, response);
+    run.answered = g;
+    LG.srsRecord(c.srs, q.itemId, g.correct);
+    let gain = 0;
+    if (g.correct) { run.combo += 1; run.correct += 1; gain = LG.xpForAnswer(run.combo, g.almost); run.xp += gain; if (run.mode === "review") state.lang.stats.reviews += 1; }
+    else { run.combo = 0; run.wrong += 1; if (run.hearts !== null) run.hearts -= 1; }
+    saveLang();
+    const stage = lg("lg-stage"), card = lg("lg-card");
+    const fb = el("div", { class: g.correct ? "lg-good" : "lg-bad", role: "status", id: "lg-feedback" }, [
+      el("div", { text: g.correct ? (g.almost ? "Close enough. " + (g.note || "") : "Correct.") + `  +${gain} XP` : "Not quite." }),
+    ]);
+    if (!g.correct || g.almost) fb.appendChild(el("div", {}, [document.createTextNode("Answer: "), q.type === "mc-meaning" || q.type === "listen" ? el("span", { text: g.expected }) : tgt(g.expected, c.tag)]));
+    const it = LG.courseItems(c).find((i) => i.id === q.itemId);
+    if (it && (!g.correct || q.type === "listen")) fb.appendChild(el("div", { class: "small" }, [tgt(it.target, c.tag), document.createTextNode(` = ${it.meaning}`)]));
+    card.appendChild(fb);
+    for (const x of card.querySelectorAll("input, button#lg-check, .lg-word")) x.setAttribute("disabled", "");
+    const out = run.hearts !== null && run.hearts <= 0;
+    card.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "lg-next", text: out ? "Out of hearts" : run.i + 1 >= run.questions.length ? "Finish" : "Continue", onclick: () => lgNext(out) })]));
+    const nb = card.querySelector("#lg-next"); if (nb && nb.focus) nb.focus();
+  }
+  function lgSkip() { if (!run || run.finished) return; run.questions.splice(run.i, 1); if (run.i >= run.questions.length) return lgFinish(false); renderLang(); }
+  function lgNext(out) {
+    if (out) return lgFinish(true);
+    run.answered = null; run.i += 1;
+    if (run.i >= run.questions.length) return lgFinish(false);
+    renderLang();
+  }
+
+  function lgFinish(failed) {
+    const c = lgCourse(); if (!c || !run) return;
+    const total = run.correct + run.wrong, res = LG.finishLesson({ correct: run.correct, total, wrong: run.wrong, failed });
+    const stats = state.lang.stats, bonus = failed ? 0 : res.bonus;
+    run.xp += bonus; run.result = res; run.bonus = bonus; run.failed = failed; run.finished = true;
+    LG.addXp(stats, run.xp);
+    if (run.mode === "lesson" && !failed) { const u = c.units[run.unit]; if (u && res.stars > u.stars) u.stars = res.stars; stats.lessons += 1; if (res.stars === 3 && run.wrong === 0) stats.perfect += 1; }
+    c.reviews = (c.reviews || 0) + (run.mode === "review" ? run.correct : 0);
+    const counts = { lessons: stats.lessons, perfect: stats.perfect, best: stats.streak.best, learned: state.lang.courses.reduce((n, x) => n + LG.learnedCount(x.srs), 0), xp: stats.xp, reviews: stats.reviews, courses: state.lang.courses.length };
+    run.badges = LG.newBadges(stats, counts); for (const b of run.badges) stats.badges.push(b.id);
+    saveLang(); renderLang();
+    const nb = lg("lg-stage").querySelector("button"); if (nb && nb.focus) nb.focus();
+  }
+
+  function lgSummaryView(stage, c) {
+    const r = run.result, s = state.lang.stats;
+    const card = el("div", { class: "tr-card", id: "lg-summary" });
+    card.appendChild(el("h3", { text: run.failed ? "Out of hearts" : run.mode === "review" ? "Review finished" : "Lesson finished" }));
+    if (run.failed) card.appendChild(el("p", { text: "Run out of hearts before the end. What you got right still counts as practice and your XP is kept. Look at the words again and try once more." }));
+    else card.appendChild(el("p", {}, [el("span", { class: "lg-star", "aria-label": `${r.stars} of 3 stars`, text: "★".repeat(r.stars) + "☆".repeat(3 - r.stars) }), document.createTextNode(`  ${r.accuracy}% right.`)]));
+    card.appendChild(el("p", { text: `+${run.xp} XP${run.bonus ? ` (including a ${run.bonus} XP bonus)` : ""}. ${LG.streakNow(s)} day streak. Level ${LG.levelOf(s.xp)}.` }));
+    for (const b of run.badges || []) card.appendChild(el("div", { class: "lg-good", text: "New badge: " + b.label }));
+    const row = el("div", { class: "row" });
+    const nextIdx = run.mode === "lesson" && !run.failed ? c.units.findIndex((u, k) => k > run.unit && u.stars === 0) : -1;
+    if (run.mode === "lesson" && run.failed) row.appendChild(el("button", { class: "btn", id: "lg-retry", text: "Look at the words again", onclick: () => { run = { mode: "study", unit: run.unit, c: c.id }; renderLang(); } }));
+    if (nextIdx >= 0) row.appendChild(el("button", { class: "btn", id: "lg-nextunit", text: "Next unit: " + c.units[nextIdx].title, onclick: () => lgOpenUnit(nextIdx) }));
+    row.appendChild(el("button", { class: "btn", text: "Back to the course", onclick: () => { run = null; renderLang(); } }));
+    card.appendChild(row); stage.appendChild(card);
+  }
+
+  function wireLang() {
+    if (!lg("view-lang") || !state.lang) return;
+    if (!LG) { lgMsg("This tab needs web/lib/lang.js. Add it next to the other files in web/lib/, push, and refresh."); return; }
+    const lv = lg("lg-level"); LG.LEVELS.forEach((l) => lv.appendChild(el("option", { value: l, text: l })));
+    const gl = lg("lg-goal"); LG.GOALS.forEach((g) => gl.appendChild(el("option", { value: g.id, text: g.label })));
+    lg("lg-create").addEventListener("click", lgCreate);
+    lg("lg-learn").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lgCreate(); } });
+    renderLang();
+  }
+
   // ---------------------------------------------------------------- training ground
   // A round is held in memory. What is kept between visits is the progress:
   // topic scores, past sessions and each target's readiness map.
@@ -2565,7 +2868,7 @@ copied from the account either. Write in a professional register.`;
     if (missing.length) { showFatal("This page is missing " + missing.join(" and ") + ". Add " + (missing.length > 1 ? "them" : "it") + " to the repository next to the other files in web/lib/, push, and refresh."); return; }
     wireControls();
     wireDocs();
-    wireTrain(); wireProfile(); wireResearch();
+    wireTrain(); wireProfile(); wireResearch(); wireLang();
     document.getElementById("aq-go").addEventListener("click", aqWrite);
     document.getElementById("aq-role").addEventListener("change", aqFill);
     loadData();
