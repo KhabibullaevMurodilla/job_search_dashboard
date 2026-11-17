@@ -39,8 +39,8 @@ on:
   # on a public fork your search becomes public too; see the README. On a
   # private fork it stays yours, and Actions is free there as well.
   #
-  # schedule:
-  #   - cron: "0 7 * * 1-5"   # 07:00 UTC, weekdays
+  schedule:
+     - cron: "0 7 * * 1-5"   # 07:00 UTC, weekdays
   workflow_dispatch:
 
 # Declared per job rather than here. The scan job needs to write commits and
