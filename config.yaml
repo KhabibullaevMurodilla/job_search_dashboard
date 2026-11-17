@@ -12,12 +12,47 @@ titles:
     - Network Engineer
     - Site Reliability Engineer
     - Cloud Engineer
-  # Titles to never show you, even if they match above.
-  exclude:
+    - Platform Engineer
+    - Kubernetes Engineer
+    - Cloud Architect
+    - Solutions Architect
+    - Virtualization Engineer
+    - OpenShift Engineer
+    - DevSecOps Engineer
+    - Cloud Security Engineer
+    - Network Security Engineer
+    - Infrastructure Security Engineer
+    - Linux Systems Engineer
+    - Linux Administrator
+    - Database Reliability Engineer
+    - Observability Engineer
+    - Storage Engineer
+    - Release Engineer
+    - Automation Engineer
+    - Cloud Infrastructure Engineer
+    - Senior DevOps Engineer
+    - Junior DevOps Engineer
+    - AWS Cloud Engineer
+    - Azure Cloud Engineer
+    - GCP Cloud Engineer
+    - Site Reliability Engineer (SRE)
+    - IT Infrastructure Engineer
+    - Systems Administrator
+    - Network & Security Engineer
+    - Telecom Network Engineer
+    - Cloud Operations Engineer
+    - Production Engineer
+    - Build and Release Engineer
+    - CI/CD Engineer
+    - Infrastructure as Code Engineer
+    - Account Manager
     - Helpdesk Technician
     - Support Specialist
     - Pre-Sales Engineer
-    - Account Manager
+  # Titles to never show you, even if they match above.
+  exclude:
+    - UK Citizen Only
+    - EU Citizen Only
     - Security Clearance Required
     - US Citizen Only
 
@@ -32,6 +67,24 @@ locations:
     - IE
     - DE
     - NL
+    - GB
+    - UK
+    - SE
+    - DK
+    - FI
+    - NO
+    - CH
+    - AT
+    - BE
+    - LU
+    - FR
+    - ES
+    - PT
+    - EE
+    - LT
+    - LV
+    - PL
+    - CZ
   # Countries where you would need a visa. Roles there that state they will
   # not sponsor are hidden; everywhere else the fact is only reported.
   need_sponsorship:
@@ -39,6 +92,22 @@ locations:
     - IE
     - DE
     - NL
+    - SE
+    - DK
+    - FI
+    - NO
+    - CH
+    - AT
+    - BE
+    - LU
+    - FR
+    - ES
+    - PT
+    - EE
+    - LT
+    - LV
+    - PL
+    - CZ
   # Never show roles in these places.
   exclude: []
 
@@ -55,7 +124,7 @@ cv:
 salary:
   # A role whose STATED pay is below this is hidden.
   # A role with NO stated pay is always shown, marked "unconfirmed salary".
-  floor: 45000
+  floor: 35000
   currency: GBP
 
 # Read against the job description. A `hard` match hides the role.
@@ -74,7 +143,7 @@ sources:
     - linkedin
     - workable
   # Limit the bundled list to where you'd actually take the role.
-  countries: [UK, IE, DE, NL]
+  countries: [UK, IE, DE, NL, SE, DK, FI, NO, CH, AT, BE, LU, FR, ES, PT, EE, LT, LV, PL, CZ]
   # The "only scan what's actually useful" switch -- an employer's own
   # board is read only if that employer matches the UK sponsor register.
   # Searches that return many employers at once (Reed, Adzuna, NHS Jobs,
