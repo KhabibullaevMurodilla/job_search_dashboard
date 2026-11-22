@@ -256,6 +256,10 @@
   .tr-opt { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; font-size: 13px; }
   .lg-q { font-size: 22px; font-weight: 700; margin: 6px 0; }
   .lg-key { font-size: 26px; font-weight: 700; margin: 4px 0; }
+  .lg-gloss { border: 0; border-bottom: 2px dotted var(--carbon); background: transparent; font: inherit; padding: 0 1px; cursor: pointer; color: inherit; }
+  .lg-save { font: inherit; font-size: 11px; border: 1px solid var(--carbon); background: transparent; cursor: pointer; padding: 0 6px; margin-left: 4px; }
+  .lg-save[disabled] { opacity: .5; cursor: default; }
+  #view-lang .btn.on { background: var(--carbon); color: var(--paper, #fff); }
   .lg-star { letter-spacing: 2px; }
   .lg-chip { display: inline-block; border: 1px solid var(--carbon); padding: 1px 8px; margin: 2px 6px 2px 0; font-size: 12px; }
   .lg-chip.off { border-style: dashed; opacity: .55; }
@@ -452,6 +456,7 @@
       </details>
       <div id="lg-msg" class="note" role="status"></div>
       <div id="lg-course"></div>
+      <div id="lg-fx"></div>
       <div id="lg-stage"></div>
     </section>
 
@@ -606,6 +611,7 @@
   <script src="./lib/research.js"></script>
   <script src="./lib/outlook.js"></script>
   <script src="./lib/lang.js"></script>
+  <script src="./lib/fluency.js"></script>
   <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
