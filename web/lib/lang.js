@@ -18,7 +18,9 @@
   ];
   const BOX_DAYS = [0, 0, 1, 3, 7, 16];          // days until the next review, by box 1..5
   const DAY = 86400000;
-  const MAX_COURSES = 5, DAILY_GOALS = [20, 50, 100];
+  const MAX_COURSES = 5, DAILY_GOALS = [20, 50, 100], MAX_UNITS = 60;
+  const CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"];
+  const startCefr = (level) => (level === "intermediate" ? "B1" : level === "some basics" ? "A2" : "A1");
 
   const str = (v, n) => String(typeof v === "string" ? v : "").trim().slice(0, n || 300);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -242,11 +244,17 @@
     { id: "xp2000", label: "2,000 XP", test: (c) => c.xp >= 2000 },
     { id: "review50", label: "50 correct reviews", test: (c) => c.reviews >= 50 },
     { id: "two", label: "Two languages at once", test: (c) => c.courses >= 2 },
+    { id: "read1", label: "First reading passage", test: (c) => (c.reads || 0) >= 1 },
+    { id: "talk1", label: "First conversation", test: (c) => (c.convos || 0) >= 1 },
+    { id: "talk10", label: "Ten conversations", test: (c) => (c.convos || 0) >= 10 },
+    { id: "gram5", label: "Five grammar lessons", test: (c) => (c.grammar || 0) >= 5 },
+    { id: "check1", label: "First level check", test: (c) => (c.checks || 0) >= 1 },
+    { id: "up", label: "Moved up a level", test: (c) => (c.ups || 0) >= 1 },
   ];
   function newBadges(stats, c) { return BADGES.filter((b) => stats.badges.indexOf(b.id) < 0 && b.test(c)); }
 
   // ------------------------------------------------------------ saved state
-  function newState() { return { stats: { xp: 0, goal: 50, day: { date: "", xp: 0 }, streak: { days: 0, last: "", best: 0 }, badges: [], lessons: 0, perfect: 0, reviews: 0 }, courses: [], active: "" }; }
+  function newState() { return { stats: { xp: 0, goal: 50, day: { date: "", xp: 0 }, streak: { days: 0, last: "", best: 0 }, badges: [], lessons: 0, perfect: 0, reviews: 0, reads: 0, convos: 0, grammar: 0, checks: 0, ups: 0 }, courses: [], active: "" }; }
   function normalizeState(x) {
     const s = newState(); if (!x || typeof x !== "object") return s;
     const st = x.stats && typeof x.stats === "object" ? x.stats : {};
@@ -256,23 +264,40 @@
     s.stats.streak = { days: num(st.streak && st.streak.days), last: /^\d{4}-\d{2}-\d{2}$/.test(str(st.streak && st.streak.last, 12)) ? st.streak.last : "", best: num(st.streak && st.streak.best) };
     s.stats.badges = (Array.isArray(st.badges) ? st.badges : []).filter((b) => BADGES.some((x) => x.id === b));
     s.stats.lessons = num(st.lessons); s.stats.perfect = num(st.perfect); s.stats.reviews = num(st.reviews);
+    for (const k of ["reads", "convos", "grammar", "checks", "ups"]) s.stats[k] = num(st[k]);
     s.courses = (Array.isArray(x.courses) ? x.courses : []).map((c) => {
       if (!c || typeof c !== "object" || !str(c.id, 40) || !str(c.name, 60)) return null;
       const units = (Array.isArray(c.units) ? c.units : []).map((u) => ({
         title: str(u && u.title, 80), focus: str(u && u.focus, 240), note: str(u && u.note, 400), stars: clamp(num(u && u.stars), 0, 3),
         items: Array.isArray(u && u.items) ? u.items.map((i) => ({ id: str(i && i.id, 20), target: str(i && i.target, 120), roman: str(i && i.roman, 160), meaning: str(i && i.meaning, 160), alts: (Array.isArray(i && i.alts) ? i.alts : []).map((a) => str(a, 120)).filter(Boolean).slice(0, 4), example: i && i.example && str(i.example.target, 240) && str(i.example.meaning, 240) ? { target: str(i.example.target, 240), roman: str(i.example.roman, 240), meaning: str(i.example.meaning, 240) } : null })).filter((i) => i.id && i.target && i.meaning) : null,
         dropped: num(u && u.dropped),
-      })).filter((u) => u.title).slice(0, 10);
+      })).filter((u) => u.title).slice(0, MAX_UNITS);
       const srs = {};
       for (const [k, r] of Object.entries(c.srs && typeof c.srs === "object" ? c.srs : {})) if (r && typeof r === "object") srs[str(k, 20)] = { box: clamp(num(r.box), 0, 5), due: num(r.due), seen: num(r.seen), right: num(r.right) };
-      return { id: str(c.id, 40), name: str(c.name, 60), nativeName: str(c.nativeName, 60), tag: str(c.tag, 20), script: str(c.script, 20), confidence: ["high", "medium", "low"].indexOf(c.confidence) >= 0 ? c.confidence : "medium", warning: str(c.warning, 300), from: str(c.from, 60) || "English", level: LEVELS.indexOf(c.level) >= 0 ? c.level : LEVELS[0], goalText: str(c.goalText, 200), units, srs, removed: (Array.isArray(c.removed) ? c.removed : []).map((r) => str(r, 20)).filter(Boolean).slice(0, 300), reviews: num(c.reviews), at: str(c.at, 40) };
+      return { id: str(c.id, 40), name: str(c.name, 60), nativeName: str(c.nativeName, 60), tag: str(c.tag, 20), script: str(c.script, 20), confidence: ["high", "medium", "low"].indexOf(c.confidence) >= 0 ? c.confidence : "medium", warning: str(c.warning, 300), from: str(c.from, 60) || "English", level: LEVELS.indexOf(c.level) >= 0 ? c.level : LEVELS[0], goalText: str(c.goalText, 200), cefr: CEFR.indexOf(c.cefr) >= 0 ? c.cefr : startCefr(LEVELS.indexOf(c.level) >= 0 ? c.level : LEVELS[0]), fx: normalizeFx(c.fx), units, srs, removed: (Array.isArray(c.removed) ? c.removed : []).map((r) => str(r, 20)).filter(Boolean).slice(0, 300), reviews: num(c.reviews), at: str(c.at, 40) };
     }).filter(Boolean).slice(0, MAX_COURSES);
     s.active = s.courses.some((c) => c.id === x.active) ? x.active : (s.courses[0] ? s.courses[0].id : "");
     return s;
   }
+
+  function normalizeFx(f) {
+    f = f && typeof f === "object" ? f : {};
+    const num = (v) => Math.max(0, Math.floor(Number(v) || 0)), day = (v) => (/^\d{4}-\d{2}-\d{2}/.test(str(v, 40)) ? str(v, 40) : "");
+    const list = (v, n, fn) => (Array.isArray(v) ? v : []).map(fn).filter(Boolean).slice(-n);
+    const topics = {};
+    for (const k of CEFR) topics[k] = list(f.topics && f.topics[k], 20, (t) => (t && str(t.title, 80) ? { title: str(t.title, 80), focus: str(t.focus, 200), done: t.done === true } : null));
+    return {
+      reads: list(f.reads, 60, (r) => (r && str(r.title, 120) ? { title: str(r.title, 120), cefr: CEFR.indexOf(r.cefr) >= 0 ? r.cefr : "", correct: num(r.correct), total: num(r.total), at: day(r.at) } : null)),
+      grammar: list(f.grammar, 60, (r) => (r && str(r.title, 120) ? { title: str(r.title, 120), cefr: CEFR.indexOf(r.cefr) >= 0 ? r.cefr : "", correct: num(r.correct), total: num(r.total), at: day(r.at) } : null)),
+      convos: list(f.convos, 60, (r) => (r && str(r.scenario, 120) ? { scenario: str(r.scenario, 120), turns: num(r.turns), clean: num(r.clean), at: day(r.at) } : null)),
+      checks: list(f.checks, 30, (r) => (r && CEFR.indexOf(r.est) >= 0 ? { cefr: CEFR.indexOf(r.cefr) >= 0 ? r.cefr : "", est: r.est, correct: num(r.correct), total: num(r.total), at: day(r.at) } : null)),
+      topics,
+      mistakes: list(f.mistakes, 100, (m) => (m && str(m.said, 300) && str(m.corrected, 300) ? { id: str(m.id, 20) || itemId(str(m.corrected, 300)), said: str(m.said, 300), corrected: str(m.corrected, 300), why: str(m.why, 300), box: clamp(num(m.box), 0, 5), due: num(m.due) } : null)),
+    };
+  }
   const courseItems = (c) => [].concat(...c.units.map((u) => u.items || []));
 
-  const api = { LEVELS, GOALS, DAILY_GOALS, MAX_COURSES, BADGES, BOX_DAYS, normalize, looseKey, distance, similarity, itemId, hasSpaces, gradeTyped, parseJson, buildCoursePrompt, parseCourse, buildUnitPrompt, parseUnit, buildCheckPrompt, parseCheck, mulberry32, shuffle, buildSession, gradeQuestion, srsRecord, dueIds, learnedCount, xpForAnswer, finishLesson, levelOf, levelStart, dayKey, addXp, streakNow, newBadges, newState, normalizeState, courseItems };
+  const api = { CEFR, MAX_UNITS, startCefr, normalizeFx, LEVELS, GOALS, DAILY_GOALS, MAX_COURSES, BADGES, BOX_DAYS, normalize, looseKey, distance, similarity, itemId, hasSpaces, gradeTyped, parseJson, buildCoursePrompt, parseCourse, buildUnitPrompt, parseUnit, buildCheckPrompt, parseCheck, mulberry32, shuffle, buildSession, gradeQuestion, srsRecord, dueIds, learnedCount, xpForAnswer, finishLesson, levelOf, levelStart, dayKey, addXp, streakNow, newBadges, newState, normalizeState, courseItems };
   root.Lang = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : globalThis);
