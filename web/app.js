@@ -2112,6 +2112,9 @@ copied from the account either. Write in a professional register.`;
     if (c.warning || c.confidence === "low") box.appendChild(el("div", { class: "note", text: (c.confidence === "low" ? "The AI is not confident in this language. " : "") + (c.warning || "") + " Check words against a dictionary or a speaker before relying on them." }));
     if (!voiceFor(c.tag)) box.appendChild(el("div", { class: "small", text: "No voice for this language was found in your browser, so listening exercises are off and the Hear it buttons may be silent." }));
     box.appendChild(head);
+    box.appendChild(fxLevelRow(c));
+    box.appendChild(lgModeBar(c));
+    if (lgMode !== "words") return;
     const due = LG.dueIds(c.srs).filter((id) => LG.courseItems(c).some((i) => i.id === id)).length;
     box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "lg-review", disabled: due ? undefined : "", text: due ? `Review ${due} word${due === 1 ? "" : "s"} that are due` : "No words due for review", onclick: () => lgStartReview() })]));
     const nextUp = c.units.findIndex((u) => u.stars === 0);
@@ -2126,9 +2129,10 @@ copied from the account either. Write in a professional register.`;
         el("div", { class: "row", style: "margin:4px 0 0" }, [el("button", { class: "btn", text: u.items ? (done ? "Practise again" : "Start") : "Write this unit and start", disabled: lgBusy ? "" : undefined, onclick: () => lgOpenUnit(i) })]),
       ]));
     });
+    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "lg-more", disabled: lgBusy || c.units.length >= LG.MAX_UNITS ? "" : undefined, text: `Add 6 more units at ${c.cefr}`, onclick: () => lgMoreUnits() })]));
   }
 
-  function renderLang() { if (!state.lang) return; lgStatsView(); lgCourseView(); lgStageView(); }
+  function renderLang() { if (!state.lang) return; lgStatsView(); lgCourseView(); lgFxView(); lgStageView(); }
 
   async function lgCreate() {
     if (lgBusy) return;
@@ -2143,7 +2147,7 @@ copied from the account either. Write in a professional register.`;
       lgBusy = true; lgMsg(`Planning your ${learn} course…`);
       const p = LG.parseCourse(await callGemini(LG.buildCoursePrompt({ learn, from, level: lg("lg-level").value, goalText, extra })));
       if (!p) throw new Error("The course plan could not be read. Press the button again.");
-      const c = { id: "c" + Date.now().toString(36), name: p.name, nativeName: p.nativeName, tag: p.tag, script: p.script, confidence: p.confidence, warning: p.warning, from, level: lg("lg-level").value, goalText, units: p.units.map((u) => ({ title: u.title, focus: u.focus, note: "", stars: 0, items: null, dropped: 0 })), srs: {}, removed: [], reviews: 0, at: new Date().toISOString() };
+      const c = { id: "c" + Date.now().toString(36), name: p.name, nativeName: p.nativeName, tag: p.tag, script: p.script, confidence: p.confidence, warning: p.warning, from, level: lg("lg-level").value, goalText, cefr: LG.startCefr(lg("lg-level").value), fx: LG.normalizeFx({}), units: p.units.map((u) => ({ title: u.title, focus: u.focus, note: "", stars: 0, items: null, dropped: 0 })), srs: {}, removed: [], reviews: 0, at: new Date().toISOString() };
       state.lang.courses.push(c); state.lang.active = c.id; run = null; saveLang();
       lgMsg(`Your ${p.name} course is ready: ${p.units.length} units. Start with the first.`);
       lg("lg-learn").value = "";
@@ -2230,7 +2234,7 @@ copied from the account either. Write in a professional register.`;
 
   function lgStageView() {
     const stage = lg("lg-stage"); if (!stage) return; stage.textContent = "";
-    const c = lgCourse(); if (!c || !run || run.c !== c.id) return;
+    const c = lgCourse(); if (!c || !run || run.c !== c.id || lgMode !== "words") return;
     if (run.mode === "study") { const u = c.units[run.unit]; if (u && u.items) lgStudyView(stage, c, u); return; }
     if (run.finished) return lgSummaryView(stage, c);
     const q = run.questions[run.i];
@@ -2323,7 +2327,7 @@ copied from the account either. Write in a professional register.`;
     LG.addXp(stats, run.xp);
     if (run.mode === "lesson" && !failed) { const u = c.units[run.unit]; if (u && res.stars > u.stars) u.stars = res.stars; stats.lessons += 1; if (res.stars === 3 && run.wrong === 0) stats.perfect += 1; }
     c.reviews = (c.reviews || 0) + (run.mode === "review" ? run.correct : 0);
-    const counts = { lessons: stats.lessons, perfect: stats.perfect, best: stats.streak.best, learned: state.lang.courses.reduce((n, x) => n + LG.learnedCount(x.srs), 0), xp: stats.xp, reviews: stats.reviews, courses: state.lang.courses.length };
+    const counts = lgCounts();
     run.badges = LG.newBadges(stats, counts); for (const b of run.badges) stats.badges.push(b.id);
     saveLang(); renderLang();
     const nb = lg("lg-stage").querySelector("button"); if (nb && nb.focus) nb.focus();
@@ -2343,6 +2347,386 @@ copied from the account either. Write in a professional register.`;
     if (nextIdx >= 0) row.appendChild(el("button", { class: "btn", id: "lg-nextunit", text: "Next unit: " + c.units[nextIdx].title, onclick: () => lgOpenUnit(nextIdx) }));
     row.appendChild(el("button", { class: "btn", text: "Back to the course", onclick: () => { run = null; renderLang(); } }));
     card.appendChild(row); stage.appendChild(card);
+  }
+
+  // ---------------------------------------------------------------- Fluency (reading, grammar, conversation, level check)
+  const FX = self.Fluency;
+  let lgMode = "words";         // words | read | grammar | talk | check
+  let fxRun = null;             // the reading, grammar lesson, conversation or check in progress
+  const fxOf = (c) => c.fx;
+  const lgCounts = () => { const s = state.lang.stats; return { lessons: s.lessons, perfect: s.perfect, best: s.streak.best, learned: state.lang.courses.reduce((n, x) => n + LG.learnedCount(x.srs), 0), xp: s.xp, reviews: s.reviews, courses: state.lang.courses.length, reads: s.reads, convos: s.convos, grammar: s.grammar, checks: s.checks, ups: s.ups }; };
+  // Add XP, award badges, save. Returns the new badges.
+  function lgGain(xp) {
+    const s = state.lang.stats; if (xp > 0) LG.addXp(s, xp);
+    const nb = LG.newBadges(s, lgCounts()); for (const b of nb) s.badges.push(b.id);
+    saveLang(); lgStatsView(); return nb;
+  }
+  const badgeLines = (list) => (list || []).map((b) => el("div", { class: "lg-good", text: "New badge: " + b.label }));
+  const fxHome = () => { fxRun = null; renderLang(); };
+
+  // Ask Gemini to solve each question without seeing the key; keep the ones it agrees with.
+  async function fxBlindCheck(c, questions) {
+    try {
+      const ans = FX.parseSolve(await callGemini(FX.buildSolvePrompt(c, questions)), questions.length);
+      if (!ans) return { kept: questions, dropped: [], unreviewed: true };
+      const r = FX.applySolve(questions, ans); return { kept: r.kept, dropped: r.dropped, unreviewed: false };
+    } catch (e) { return { kept: questions, dropped: [], unreviewed: true }; }
+  }
+  function fxNeed(c) {
+    if (!FX) throw new Error("This needs web/lib/fluency.js. Add it next to the other files in web/lib/, push, and refresh.");
+    if (!lsGet(LS.geminiKey, "")) throw new Error("Add your Gemini key first (top of the page).");
+  }
+  async function fxBusy(text, fn) {
+    if (lgBusy) return; lgBusy = true; lgMsg(text); renderLang();
+    try { await fn(); } catch (e) { lgMsg(e.message || String(e)); }
+    lgBusy = false; renderLang();
+  }
+  // One question with options, graded when you press Check.
+  function fxChoiceCard(q, tag, onDone, opts) {
+    const card = el("div", { class: "tr-card" });
+    if (opts && opts.head) card.appendChild(el("div", { class: "small", role: "status", text: opts.head }));
+    if (q.context) card.appendChild(el("div", { class: "lg-key", style: "font-size:18px" }, [tgt(q.context, tag)]));
+    if (q.sentence) card.appendChild(el("div", { class: "lg-key" }, [tgt(q.sentence, tag)]));
+    if (q.meaning) card.appendChild(el("div", { class: "small", text: "Meaning: " + q.meaning }));
+    card.appendChild(el("div", { class: "lg-q", text: q.q }));
+    const body = el("div", {}); card.appendChild(body);
+    q.options.forEach((o, k) => { const id = `fx-o-${Math.random().toString(36).slice(2, 7)}-${k}`; body.appendChild(el("div", { class: "tr-opt" }, [el("input", { type: "radio", name: "fx-choice", id, value: String(k) }), el("label", { for: id }, [tgt(o, tag)])])); });
+    const row = el("div", { class: "row" }); const check = el("button", { class: "btn", type: "button", id: "fx-check", text: "Check" }); row.appendChild(check); card.appendChild(row);
+    check.addEventListener("click", () => {
+      const r = body.querySelector('input[name="fx-choice"]:checked'); if (!r) { lgMsg("Choose an answer first."); return; }
+      lgMsg(""); const idx = Number(r.value), ok = idx === q.answer;
+      for (const x of card.querySelectorAll("input")) x.setAttribute("disabled", ""); check.setAttribute("disabled", "");
+      card.appendChild(el("div", { class: ok ? "lg-good" : "lg-bad", id: "fx-feedback", role: "status" }, [el("div", { text: ok ? "Correct." : "Not quite." }), ok ? null : el("div", {}, [document.createTextNode("Answer: "), tgt(q.options[q.answer], tag)])].filter(Boolean)));
+      if (q.evidence) card.appendChild(el("div", { class: "small", text: "The text says: " + q.evidence }));
+      const nx = el("button", { class: "btn", id: "fx-next", type: "button", text: (opts && opts.last) ? "Finish" : "Continue", onclick: () => onDone(ok) }); card.appendChild(el("div", { class: "row" }, [nx])); if (nx.focus) nx.focus();
+    });
+    return card;
+  }
+
+  // ---- shared: level, more units
+  function fxLevelRow(c) {
+    const row = el("div", { class: "row", style: "align-items:center" });
+    row.appendChild(el("span", { class: "small", text: "My level: " }));
+    const sel = el("select", { id: "lg-cefr", "aria-label": "My level", style: "width:auto" }, LG.CEFR.map((k) => el("option", { value: k, text: k + " " + (({ A1: "first steps", A2: "basic", B1: "independent", B2: "confident", C1: "advanced", C2: "near-native" })[k]) })));
+    sel.value = c.cefr; sel.addEventListener("change", () => { if (LG.CEFR.indexOf(sel.value) > LG.CEFR.indexOf(c.cefr)) state.lang.stats.ups += 1; c.cefr = sel.value; lgGain(0); renderLang(); });
+    row.appendChild(sel);
+    return row;
+  }
+  async function lgMoreUnits() {
+    const c = lgCourse(); if (!c) return;
+    if (c.units.length >= LG.MAX_UNITS) { lgMsg(`A course holds up to ${LG.MAX_UNITS} units.`); return; }
+    await fxBusy(`Planning more units at ${c.cefr}…`, async () => {
+      fxNeed(c);
+      const more = FX.parseMoreUnits(await callGemini(FX.buildMoreUnitsPrompt({ course: c, cefr: c.cefr, count: 6 })), c.units.map((u) => u.title));
+      if (!more) throw new Error("No new units could be read. Press the button again.");
+      for (const u of more.slice(0, LG.MAX_UNITS - c.units.length)) c.units.push({ title: u.title, focus: u.focus, note: "", stars: 0, items: null, dropped: 0 });
+      saveLang(); lgMsg(`${more.length} new units added at ${c.cefr}.`);
+    });
+  }
+
+  function lgModeBar(c) {
+    const bar = el("div", { class: "row", role: "tablist", "aria-label": "What to practise", style: "margin:10px 0" });
+    for (const [id, label] of [["words", "Words"], ["read", "Reading"], ["grammar", "Grammar"], ["talk", "Conversation"], ["check", "Level check"]]) {
+      bar.appendChild(el("button", { class: "btn" + (lgMode === id ? " on" : ""), id: "lg-mode-" + id, role: "tab", "aria-selected": lgMode === id ? "true" : "false", text: label, onclick: () => { if (fxRun && !fxRun.done && !window.confirm("Leave what you are doing? Progress already earned is kept.")) return; fxRun = null; run = null; lgMode = id; lgMsg(""); renderLang(); } }));
+    }
+    return bar;
+  }
+
+  function lgFxView() {
+    const box = lg("lg-fx"); if (!box) return; box.textContent = "";
+    const c = lgCourse(); if (!c || lgMode === "words") return;
+    if (lgMode === "read") lgReadView(box, c); else if (lgMode === "grammar") lgGrammarView(box, c); else if (lgMode === "talk") lgTalkView(box, c); else if (lgMode === "check") lgCheckView(box, c);
+  }
+
+  // ---- reading
+  function lgReadView(box, c) {
+    if (!fxRun || fxRun.kind !== "read") {
+      box.appendChild(el("p", { class: "small", style: "max-width:64ch", text: `Short texts written for ${c.cefr}. Tap a marked word for its meaning, listen to the text, then answer questions. Every question is tied to a sentence in the text, and a second check solves each one without the key; questions it disagrees with are dropped.` }));
+      box.appendChild(el("label", { for: "fx-topic", text: "Topic (optional)" }));
+      box.appendChild(el("input", { id: "fx-topic", type: "text", placeholder: "for example: a day at the market, a job advert, a news item", autocomplete: "off" }));
+      box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-read-go", disabled: lgBusy ? "" : undefined, text: "Write me a text to read", onclick: () => lgReadStart(c) })]));
+      const h = fxOf(c).reads.slice(-5).reverse();
+      if (h.length) box.appendChild(el("div", { class: "small", text: "Recent: " + h.map((r) => `${r.title} (${r.correct}/${r.total})`).join("; ") }));
+      return;
+    }
+    const d = fxRun.data;
+    box.appendChild(el("h3", { style: "margin:6px 0", text: d.title }));
+    if (fxRun.unreviewed) box.appendChild(el("div", { class: "note", text: "The second check could not run, so the questions are unchecked. Treat them with care." }));
+    if (fxRun.dropped) box.appendChild(el("div", { class: "small", text: `${fxRun.dropped} question${fxRun.dropped === 1 ? "" : "s"} failed the second check and ${fxRun.dropped === 1 ? "was" : "were"} left out.` }));
+    const out = el("div", { id: "fx-gloss-out", class: "note", role: "status", "aria-live": "polite", hidden: "" });
+    d.paragraphs.forEach((p, pi) => {
+      const para = el("div", { class: "tr-card", id: "fx-p-" + pi });
+      const line = el("div", { class: "lg-q", style: "font-size:19px;line-height:1.7", lang: c.tag || undefined, dir: "auto" });
+      let at = 0; for (const sp of FX.glossSpans(p.text, d.glosses)) { if (sp.start > at) line.appendChild(document.createTextNode(p.text.slice(at, sp.start))); line.appendChild(el("button", { class: "lg-gloss", type: "button", "aria-label": `${sp.word}: tap for the meaning`, text: sp.word, onclick: () => { out.hidden = false; out.textContent = ""; out.appendChild(tgt(sp.word, c.tag)); out.appendChild(document.createTextNode(" = " + sp.meaning)); } })); at = sp.end; }
+      if (at < p.text.length) line.appendChild(document.createTextNode(p.text.slice(at)));
+      para.appendChild(line);
+      const tr = el("div", { class: "small", hidden: "", style: "margin-top:6px" }, [document.createTextNode((p.roman ? p.roman + "  " : "") + (p.meaning ? "= " + p.meaning : ""))]);
+      para.appendChild(el("div", { class: "row", style: "margin:6px 0 0" }, [hearBtn(p.text, c.tag), el("button", { class: "btn", type: "button", "aria-expanded": "false", text: "Show translation", onclick: (e) => { tr.hidden = !tr.hidden; e.target.textContent = tr.hidden ? "Show translation" : "Hide translation"; e.target.setAttribute("aria-expanded", tr.hidden ? "false" : "true"); } })]));
+      para.appendChild(tr); box.appendChild(para);
+    });
+    box.appendChild(out);
+    if (d.glosses.length) {
+      const gl = el("div", { class: "small", style: "margin:8px 0" }, [el("strong", { text: "Words in this text: " })]);
+      for (const g of d.glosses) { const saved = LG.courseItems(c).some((i) => i.id === LG.itemId(g.word)) || c.removed.indexOf(LG.itemId(g.word)) >= 0; gl.appendChild(el("span", { class: "lg-chip" }, [tgt(g.word, c.tag), document.createTextNode(" " + g.meaning + " "), el("button", { class: "lg-save", type: "button", "aria-label": "Save " + g.word + " to my words", disabled: saved ? "" : undefined, text: saved ? "saved" : "save", onclick: () => { lgSaveWord(c, g); renderLang(); } })])); }
+      box.appendChild(gl);
+    }
+    const qbox = el("div", { id: "fx-questions" }); box.appendChild(qbox);
+    const paint = () => {
+      qbox.textContent = "";
+      if (fxRun.done) { qbox.appendChild(el("div", { class: "tr-card", id: "fx-read-sum" }, [el("h3", { text: "Reading finished" }), el("p", { text: `${fxRun.correct} of ${d.questions.length} right. +${fxRun.xp} XP.` }), ...badgeLines(fxRun.badges), el("div", { class: "row" }, [el("button", { class: "btn", text: "Another text", onclick: () => fxHome() })])])); return; }
+      const q = d.questions[fxRun.i];
+      qbox.appendChild(fxChoiceCard(q, c.tag, (ok) => { if (ok) { fxRun.correct += 1; fxRun.xp += 8; } fxRun.i += 1; if (fxRun.i >= d.questions.length) lgReadFinish(c); else paint(); }, { head: `Question ${fxRun.i + 1} of ${d.questions.length}`, last: fxRun.i + 1 >= d.questions.length }));
+    };
+    paint();
+    box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", text: "Leave this text", onclick: () => { if (!fxRun.done && fxRun.i > 0 && !window.confirm("Leave? Your score for this text will not be saved.")) return; fxHome(); } })]));
+  }
+  function lgSaveWord(c, g) {
+    const item = FX.glossItem(g); if (LG.courseItems(c).some((i) => i.id === item.id) || c.removed.indexOf(item.id) >= 0) return;
+    let u = c.units.find((x) => x.title === "From my reading");
+    if (!u) { u = { title: "From my reading", focus: "Words you saved from texts", note: "", stars: 0, items: [], dropped: 0 }; c.units.push(u); }
+    u.items.push(item); c.srs[item.id] = { box: 1, due: Date.now(), seen: 0, right: 0 }; saveLang(); lgMsg("Saved. It will come back in your reviews.");
+  }
+  async function lgReadStart(c) {
+    const topic = (lg("fx-topic") || {}).value || "";
+    await fxBusy(`Writing a ${c.cefr} text…`, async () => {
+      fxNeed(c);
+      const p = FX.parseRead(await callGemini(FX.buildReadPrompt({ course: c, cefr: c.cefr, topic: topic.trim(), known: LG.courseItems(c).map((i) => i.target) })), {});
+      if (!p) throw new Error("The text could not be read. Press the button again.");
+      if (!p.ok) throw new Error(p.reason + " Press the button again.");
+      lgMsg("Having a second check solve each question…");
+      const full = p.paragraphs.map((x) => x.text).join("\n");
+      const qs = p.questions.map((q) => Object.assign({}, q, { context: full }));
+      const r = await fxBlindCheck(c, qs);
+      if (r.kept.length < 3) throw new Error("Too many questions failed the check. Press the button again for a fresh text.");
+      p.questions = r.kept.map((q) => ({ q: q.q, options: q.options, answer: q.answer, evidence: q.evidence }));
+      fxRun = { kind: "read", data: p, i: 0, correct: 0, xp: 0, done: false, unreviewed: r.unreviewed, dropped: r.dropped.length };
+      lgMsg("");
+    });
+  }
+  function lgReadFinish(c) {
+    const d = fxRun.data; fxRun.done = true; const s = state.lang.stats; s.reads += 1;
+    fxOf(c).reads.push({ title: d.title, cefr: c.cefr, correct: fxRun.correct, total: d.questions.length, at: LG.dayKey() }); fxOf(c).reads = fxOf(c).reads.slice(-60);
+    fxRun.badges = lgGain(fxRun.xp); renderLang();
+  }
+
+  // ---- grammar
+  function lgGrammarView(box, c) {
+    const f = fxOf(c);
+    if (!fxRun || fxRun.kind !== "grammar") {
+      box.appendChild(el("p", { class: "small", style: "max-width:64ch", text: `Short lessons on the grammar that matters at ${c.cefr}: the rule, patterns, examples, then exercises. Exercises are checked by a second pass that solves them without the key. Grammar is the part the AI is most likely to get subtly wrong, so check anything surprising in a grammar book.` }));
+      const list = f.topics[c.cefr];
+      if (!list.length) box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-topics-go", disabled: lgBusy ? "" : undefined, text: `Suggest grammar topics for ${c.cefr}`, onclick: () => lgTopics(c) })]));
+      list.forEach((t, i) => box.appendChild(el("div", { class: "tr-req", id: "fx-topic-" + i }, [el("div", {}, [el("span", { class: "tr-badge " + (t.done ? "strong" : ""), text: t.done ? "done" : "open" }), el("strong", { text: t.title })]), el("div", { class: "small", text: t.focus }), el("div", { class: "row", style: "margin:4px 0 0" }, [el("button", { class: "btn", disabled: lgBusy ? "" : undefined, text: t.done ? "Practise again" : "Start", onclick: () => lgGrammarStart(c, t) })])])));
+      box.appendChild(el("label", { for: "fx-own", text: "Or a topic of your own" }));
+      box.appendChild(el("input", { id: "fx-own", type: "text", placeholder: "for example: how to use the past tense", autocomplete: "off" }));
+      box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-own-go", disabled: lgBusy ? "" : undefined, text: "Teach me this", onclick: () => { const v = lg("fx-own").value.trim(); if (!v) { lgMsg("Type a topic first."); return; } lgGrammarStart(c, { title: v, focus: "", own: true }); } })]));
+      return;
+    }
+    const L1 = fxRun.lesson;
+    if (fxRun.stage === "learn") {
+      box.appendChild(el("h3", { style: "margin:6px 0", text: L1.title }));
+      if (fxRun.unreviewed) box.appendChild(el("div", { class: "note", text: "The second check could not run, so the exercises are unchecked." }));
+      box.appendChild(el("p", { style: "max-width:64ch", text: L1.rule }));
+      for (const p of L1.patterns) box.appendChild(el("div", { class: "tr-card" }, [el("div", { class: "lg-key", style: "font-size:20px" }, [tgt(p.target, c.tag)]), p.roman ? el("div", { class: "small", text: p.roman }) : null, el("div", { text: p.meaning })].filter(Boolean)));
+      box.appendChild(el("div", { class: "small", style: "margin:8px 0" }, [el("strong", { text: "Examples" })]));
+      for (const x of L1.examples) box.appendChild(el("div", { class: "tr-card" }, [el("div", { class: "lg-key", style: "font-size:20px" }, [tgt(x.target, c.tag)]), x.roman ? el("div", { class: "small", text: x.roman }) : null, el("div", { text: x.meaning }), el("div", { class: "row", style: "margin:6px 0 0" }, [hearBtn(x.target, c.tag)])].filter(Boolean)));
+      if (L1.mistakes.length) box.appendChild(el("div", { class: "note", text: "Common mistakes: " + L1.mistakes.join(" ") }));
+      box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-gram-go", text: "Start the exercises", onclick: () => { fxRun.stage = "do"; renderLang(); } }), el("button", { class: "btn", text: "Close", onclick: () => fxHome() })]));
+      return;
+    }
+    const q = fxRun.stage === "do" ? L1.exercises[fxRun.i] : null;
+    if (!q) {
+      box.appendChild(el("div", { class: "tr-card", id: "fx-gram-sum" }, [el("h3", { text: "Lesson finished" }), el("p", { text: `${fxRun.correct} of ${L1.exercises.length} right. +${fxRun.xp} XP.` }), ...badgeLines(fxRun.badges), el("div", { class: "row" }, [el("button", { class: "btn", text: "Back to topics", onclick: () => fxHome() })])]));
+      return;
+    }
+    const last = fxRun.i + 1 >= L1.exercises.length;
+    const finish = () => { fxRun.i += 1; if (fxRun.i >= L1.exercises.length) lgGrammarFinish(c); else renderLang(); };
+    if (q.kind === "mc") { box.appendChild(fxChoiceCard({ q: q.q, sentence: q.sentence, meaning: q.meaning, options: q.options, answer: q.answer }, c.tag, (ok) => { if (ok) { fxRun.correct += 1; fxRun.xp += 8; } finish(); }, { head: `Exercise ${fxRun.i + 1} of ${L1.exercises.length}`, last })); return; }
+    const card = el("div", { class: "tr-card", id: "fx-gram-card" });
+    card.appendChild(el("div", { class: "small", role: "status", text: `Exercise ${fxRun.i + 1} of ${L1.exercises.length}` }));
+    card.appendChild(el("div", { class: "lg-key" }, [tgt(q.sentence, c.tag)])); card.appendChild(el("div", { class: "small", text: "Meaning: " + q.meaning })); card.appendChild(el("div", { class: "lg-q", text: q.q }));
+    const inp = el("input", { type: "text", id: "fx-answer", "aria-label": "Your answer", autocomplete: "off", autocapitalize: "off", spellcheck: "false", lang: c.tag || undefined, dir: "auto" }); card.appendChild(inp);
+    const chk = el("button", { class: "btn", id: "fx-check", type: "button", text: "Check" }); card.appendChild(el("div", { class: "row" }, [chk]));
+    const go = () => {
+      if (!inp.value.trim()) { lgMsg("Type an answer first."); return; } lgMsg(""); const g = FX.gradeExercise(q, inp.value); inp.setAttribute("disabled", ""); chk.setAttribute("disabled", "");
+      if (g.correct) { fxRun.correct += 1; fxRun.xp += g.almost ? 6 : 8; }
+      card.appendChild(el("div", { class: g.correct ? "lg-good" : "lg-bad", id: "fx-feedback", role: "status" }, [el("div", { text: g.correct ? (g.almost ? "Close enough. " + g.note : "Correct.") : "Not quite." }), (!g.correct || g.almost) ? el("div", { text: "Answer: " + g.expected }) : null, el("div", { class: "small", text: q.full })].filter(Boolean)));
+      const nx = el("button", { class: "btn", id: "fx-next", type: "button", text: last ? "Finish" : "Continue", onclick: finish }); card.appendChild(el("div", { class: "row" }, [nx])); if (nx.focus) nx.focus();
+    };
+    chk.addEventListener("click", go); inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (!inp.disabled) go(); } });
+    box.appendChild(card); if (inp.focus) inp.focus();
+  }
+  async function lgTopics(c) {
+    await fxBusy("Listing grammar topics…", async () => {
+      fxNeed(c); const t = FX.parseTopics(await callGemini(FX.buildGrammarTopicsPrompt({ course: c, cefr: c.cefr })));
+      if (!t) throw new Error("The topics could not be read. Press the button again.");
+      fxOf(c).topics[c.cefr] = t; saveLang(); lgMsg("");
+    });
+  }
+  async function lgGrammarStart(c, topic) {
+    await fxBusy(`Writing the lesson: ${topic.title}…`, async () => {
+      fxNeed(c);
+      const p = FX.parseGrammar(await callGemini(FX.buildGrammarPrompt({ course: c, cefr: c.cefr, topic })), { topic });
+      if (!p) throw new Error("The lesson could not be read. Press Start again.");
+      if (!p.ok) throw new Error(p.reason + " Press Start again.");
+      lgMsg("Having a second check solve each exercise…");
+      const r = await fxBlindCheck(c, p.exercises);
+      if (r.kept.length < 3) throw new Error("Too many exercises failed the check. Press Start again for a fresh lesson.");
+      p.exercises = r.kept;
+      fxRun = { kind: "grammar", lesson: p, topic, stage: "learn", i: 0, correct: 0, xp: 0, done: false, unreviewed: r.unreviewed };
+      lgMsg(r.dropped.length ? `${r.dropped.length} exercise${r.dropped.length === 1 ? "" : "s"} failed the check and ${r.dropped.length === 1 ? "was" : "were"} left out.` : "");
+    });
+  }
+  function lgGrammarFinish(c) {
+    fxRun.done = true; fxRun.stage = "sum"; state.lang.stats.grammar += 1;
+    fxOf(c).grammar.push({ title: fxRun.lesson.title, cefr: c.cefr, correct: fxRun.correct, total: fxRun.lesson.exercises.length, at: LG.dayKey() }); fxOf(c).grammar = fxOf(c).grammar.slice(-60);
+    const t = fxOf(c).topics[c.cefr].find((x) => x.title === fxRun.topic.title); if (t) t.done = true;
+    fxRun.badges = lgGain(fxRun.xp); renderLang();
+  }
+
+  // ---- conversation
+  function lgTalkView(box, c) {
+    if (!fxRun || (fxRun.kind !== "talk" && fxRun.kind !== "mist")) {
+      box.appendChild(el("p", { class: "small", style: "max-width:64ch", text: `Practise talking with a native-speaker role-play at ${c.cefr}. You write (or speak, in Chrome or Edge) and the partner answers at your level. After each message you get a correction only if the AI finds a real mistake. It can be wrong, so every correction has a "Report wrong" button. Your mistakes are kept so you can practise them.` }));
+      box.appendChild(el("label", { for: "fx-scenario", text: "Situation" }));
+      const sel = el("select", { id: "fx-scenario" }, FX.SCENARIOS.map((s) => el("option", { value: s.id, text: s.label }))); box.appendChild(sel);
+      const custom = el("input", { id: "fx-custom", type: "text", placeholder: "Describe the situation, for example: I am calling a hotel to change my booking", autocomplete: "off", hidden: "" }); box.appendChild(custom);
+      sel.addEventListener("change", () => { custom.hidden = sel.value !== "custom"; });
+      box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-talk-go", disabled: lgBusy ? "" : undefined, text: "Start the conversation", onclick: () => { const s = FX.SCENARIOS.find((x) => x.id === sel.value); if (s.id === "custom" && !custom.value.trim()) { lgMsg("Describe the situation first."); return; } lgTalkStart(c, s.id === "custom" ? { id: "custom", label: "My own situation", brief: custom.value.trim() } : s); } })]));
+      const f = fxOf(c), due = FX.dueMistakes(f.mistakes).length;
+      box.appendChild(el("h3", { style: "margin:14px 0 4px", text: "My mistakes" }));
+      box.appendChild(el("div", { class: "small", text: f.mistakes.length ? `${f.mistakes.length} saved from your conversations; ${due} due now.` : "Mistakes you make in conversations are saved here for practice." }));
+      box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-mist-go", disabled: due ? undefined : "", text: due ? `Practise ${Math.min(due, 8)} of them` : "Nothing due", onclick: () => lgMistStart(c) })]));
+      const h = f.convos.slice(-5).reverse(); if (h.length) box.appendChild(el("div", { class: "small", text: "Recent: " + h.map((r) => `${r.scenario} (${r.turns} messages, ${r.clean} without a mistake)`).join("; ") }));
+      return;
+    }
+    if (fxRun.kind === "mist") return lgMistView(box, c);
+    const t = fxRun;
+    box.appendChild(el("h3", { style: "margin:6px 0", text: t.scenario.label }));
+    const log = el("div", { id: "fx-log", role: "log", "aria-live": "polite" }); box.appendChild(log);
+    t.history.forEach((m, k) => {
+      if (m.role === "partner") {
+        const b = el("div", { class: "tr-card fx-partner" }, [el("div", { lang: c.tag || undefined, dir: "auto", class: "lg-q", style: "font-size:19px", text: m.text })]);
+        const extra = el("div", { class: "small", hidden: "" }, [document.createTextNode((m.roman ? m.roman + "  " : "") + (m.meaning ? "= " + m.meaning : ""))]);
+        b.appendChild(el("div", { class: "row", style: "margin:4px 0 0" }, [hearBtn(m.text, c.tag), el("button", { class: "btn", type: "button", "aria-expanded": "false", text: "Show meaning", onclick: (e) => { extra.hidden = !extra.hidden; e.target.textContent = extra.hidden ? "Show meaning" : "Hide meaning"; e.target.setAttribute("aria-expanded", extra.hidden ? "false" : "true"); } })])); b.appendChild(extra);
+        log.appendChild(b);
+      } else {
+        const b = el("div", { class: "tr-card fx-user", style: "margin-left:24px" }, [el("div", { lang: c.tag || undefined, dir: "auto", text: m.text })]);
+        if (m.correction) { const cc = m.correction; b.appendChild(el("div", { class: "lg-bad fx-corr" }, [el("div", {}, [document.createTextNode(cc.kind === "fix" ? "Better: " : "A more natural way: "), tgt(cc.corrected, c.tag)]), cc.why ? el("div", { class: "small", text: cc.why }) : null, el("button", { class: "btn", type: "button", "aria-label": "Report this correction as wrong", text: "Report wrong", onclick: () => { FX.removeMistake(fxOf(c).mistakes, LG.itemId(cc.corrected)); m.correction = null; saveLang(); renderLang(); } })].filter(Boolean))); }
+        else if (m.checked) b.appendChild(el("div", { class: "small", text: "No mistake found." }));
+        log.appendChild(b);
+      }
+    });
+    if (lgBusy) log.appendChild(el("div", { class: "small", role: "status", text: "Your partner is writing…" }));
+    const lastP = [...t.history].reverse().find((m) => m.role === "partner");
+    const sug = lastP && lastP.suggestions && lastP.suggestions.length ? el("div", { class: "small", id: "fx-hints", hidden: "" }, lastP.suggestions.map((s) => el("button", { class: "lg-word", type: "button", onclick: () => { lg("fx-say").value = s.target; lg("fx-say").focus(); } }, [tgt(s.target, c.tag), document.createTextNode(s.meaning ? "  (" + s.meaning + ")" : "")]))) : null;
+    const inp = el("input", { type: "text", id: "fx-say", value: t.draft || "", "aria-label": "Your message", autocomplete: "off", lang: c.tag || undefined, dir: "auto", placeholder: "Write your reply" });
+    const send = el("button", { class: "btn", id: "fx-send", type: "button", disabled: lgBusy ? "" : undefined, text: "Send", onclick: () => lgTalkSend(c) });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lgTalkSend(c); } });
+    box.appendChild(inp);
+    const rowb = el("div", { class: "row" }, [send]);
+    if (sug) rowb.appendChild(el("button", { class: "btn", id: "fx-hint", type: "button", "aria-expanded": "false", text: "Give me ideas", onclick: (e) => { sug.hidden = !sug.hidden; e.target.setAttribute("aria-expanded", sug.hidden ? "false" : "true"); } }));
+    const RC = recogClass(); if (RC && c.tag) rowb.appendChild(el("button", { class: "btn", id: "fx-mic", type: "button", text: "Speak", onclick: () => { try { const r = new RC(); r.lang = c.tag; r.interimResults = false; r.onresult = (e) => { inp.value = (e.results[0][0] || {}).transcript || ""; inp.focus(); }; r.start(); } catch (e) { lgMsg("Speech recognition is not available here."); } } }));
+    rowb.appendChild(el("button", { class: "btn", id: "fx-end", type: "button", text: "Finish conversation", onclick: () => lgTalkEnd(c) }));
+    box.appendChild(rowb); if (sug) box.appendChild(sug);
+    if (t.done) { box.textContent = ""; box.appendChild(el("div", { class: "tr-card", id: "fx-talk-sum" }, [el("h3", { text: "Conversation finished" }), el("p", { text: `${t.turns} message${t.turns === 1 ? "" : "s"}, ${t.clean} without a mistake. +${t.xp} XP.` }), t.newMist ? el("p", { text: `${t.newMist} mistake${t.newMist === 1 ? "" : "s"} saved for practice.` }) : null, ...badgeLines(t.badges), el("div", { class: "row" }, [el("button", { class: "btn", text: "Back", onclick: () => fxHome() })])].filter(Boolean))); }
+    else if (inp.focus && !lgBusy) inp.focus();
+  }
+  async function lgTalkStart(c, scenario) {
+    await fxBusy("Your partner is getting ready…", async () => {
+      fxNeed(c);
+      const p = FX.parseChat(await callGemini(FX.buildChatPrompt({ course: c, cefr: c.cefr, scenario, history: [] })), "");
+      if (!p) throw new Error("The conversation could not start. Press the button again.");
+      fxRun = { kind: "talk", scenario, history: [{ role: "partner", text: p.reply.target, roman: p.reply.roman, meaning: p.reply.meaning, suggestions: p.suggestions }], turns: 0, clean: 0, xp: 0, newMist: 0, done: false };
+      lgMsg("");
+    });
+  }
+  async function lgTalkSend(c) {
+    const t = fxRun; if (!t || t.kind !== "talk" || t.done || lgBusy) return;
+    const said = (lg("fx-say").value || "").trim(); if (!said) { lgMsg("Write something first."); return; }
+    const msg = { role: "user", text: said, correction: null, checked: false }; t.history.push(msg);
+    await fxBusy("", async () => {
+      try {
+        fxNeed(c);
+        const p = FX.parseChat(await callGemini(FX.buildChatPrompt({ course: c, cefr: c.cefr, scenario: t.scenario, history: t.history.map((m) => ({ role: m.role, text: m.text })) })), said);
+        if (!p) throw new Error("The reply could not be read. Your message was not sent; press Send again.");
+        msg.checked = true; msg.correction = p.correction;
+        t.turns += 1; let gain = 6; if (!p.correction) { t.clean += 1; gain += 4; }
+        else if (p.correction.kind === "fix") { const before = fxOf(c).mistakes.length; FX.addMistake(fxOf(c).mistakes, said, p.correction.corrected, p.correction.why); if (fxOf(c).mistakes.length > before) t.newMist += 1; }
+        t.xp += gain; lgGain(gain);
+        t.history.push({ role: "partner", text: p.reply.target, roman: p.reply.roman, meaning: p.reply.meaning, suggestions: p.suggestions }); t.draft = "";
+      } catch (e) { t.history.pop(); t.draft = said; throw e; }
+    });
+  }
+  function lgTalkEnd(c) {
+    const t = fxRun; if (!t || t.kind !== "talk" || t.done) return;
+    if (t.turns === 0) { fxHome(); return; }
+    t.done = true; state.lang.stats.convos += 1; fxOf(c).convos.push({ scenario: t.scenario.label, turns: t.turns, clean: t.clean, at: LG.dayKey() }); fxOf(c).convos = fxOf(c).convos.slice(-60);
+    t.badges = lgGain(0); renderLang();
+  }
+  // practise saved mistakes
+  function lgMistStart(c) {
+    const items = FX.dueMistakes(fxOf(c).mistakes).slice(0, 8); if (!items.length) return;
+    fxRun = { kind: "mist", ids: items.map((m) => m.id), i: 0, correct: 0, xp: 0, done: false, answered: false }; renderLang();
+  }
+  function lgMistView(box, c) {
+    const t = fxRun, f = fxOf(c);
+    if (t.done || t.i >= t.ids.length) { box.appendChild(el("div", { class: "tr-card", id: "fx-mist-sum" }, [el("h3", { text: "Practice finished" }), el("p", { text: `${t.correct} of ${t.ids.length} right. +${t.xp} XP.` }), ...badgeLines(t.badges), el("div", { class: "row" }, [el("button", { class: "btn", text: "Back", onclick: () => fxHome() })])])); return; }
+    const m = f.mistakes.find((x) => x.id === t.ids[t.i]); if (!m) { t.i += 1; return lgMistView(box, c); }
+    const card = el("div", { class: "tr-card", id: "fx-mist-card" });
+    card.appendChild(el("div", { class: "small", role: "status", text: `Sentence ${t.i + 1} of ${t.ids.length}. This one has a mistake in it.` }));
+    card.appendChild(el("div", { class: "lg-key" }, [tgt(m.said, c.tag)])); card.appendChild(el("div", { class: "lg-q", text: "Type the corrected sentence." }));
+    const inp = el("input", { type: "text", id: "fx-answer", "aria-label": "The corrected sentence", autocomplete: "off", lang: c.tag || undefined, dir: "auto" }); card.appendChild(inp);
+    const chk = el("button", { class: "btn", id: "fx-check", type: "button", text: "Check" }); card.appendChild(el("div", { class: "row" }, [chk]));
+    const go = () => {
+      if (!inp.value.trim()) { lgMsg("Type an answer first."); return; } const g = LG.gradeTyped(inp.value, [m.corrected]), ok = g.result !== "wrong"; inp.setAttribute("disabled", ""); chk.setAttribute("disabled", "");
+      FX.recordMistake(m, ok); if (ok) { t.correct += 1; t.xp += 5; } saveLang();
+      card.appendChild(el("div", { class: ok ? "lg-good" : "lg-bad", id: "fx-feedback", role: "status" }, [el("div", { text: ok ? "Correct." : "Not quite." }), ok ? null : el("div", {}, [document.createTextNode("Correct form: "), tgt(m.corrected, c.tag)]), m.why ? el("div", { class: "small", text: m.why }) : null].filter(Boolean)));
+      const last = t.i + 1 >= t.ids.length;
+      const nx = el("button", { class: "btn", id: "fx-next", type: "button", text: last ? "Finish" : "Continue", onclick: () => { t.i += 1; if (last) { t.done = true; t.badges = lgGain(t.xp); } else saveLang(); renderLang(); } }); card.appendChild(el("div", { class: "row" }, [nx, el("button", { class: "btn", type: "button", "aria-label": "Remove this mistake from my list", text: "Remove from list", onclick: () => { FX.removeMistake(f.mistakes, m.id); t.ids.splice(t.i, 1); if (t.i >= t.ids.length) { t.done = true; t.badges = lgGain(t.xp); } saveLang(); renderLang(); } })])); if (nx.focus) nx.focus();
+    };
+    chk.addEventListener("click", go); inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (!inp.disabled) go(); } });
+    box.appendChild(card); if (inp.focus) inp.focus();
+  }
+
+  // ---- level check
+  function lgCheckView(box, c) {
+    const f = fxOf(c);
+    if (!fxRun || fxRun.kind !== "check") {
+      box.appendChild(el("p", { class: "small", style: "max-width:64ch", text: `A short check of about 12 questions on vocabulary, grammar and reading, a few below, at and above ${c.cefr}. It gives an indication of where you are, not a certificate: it is written by an AI, and a real exam or a teacher is the only real measure. Each question is solved blind by a second pass first, and any it disagrees with is left out.` }));
+      box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "fx-check-go", disabled: lgBusy ? "" : undefined, text: "Take a level check", onclick: () => lgCheckStart(c) })]));
+      const h = f.checks.slice(-5).reverse(); if (h.length) box.appendChild(el("div", { class: "small", text: "Earlier checks: " + h.map((r) => `${r.at}: ${r.correct}/${r.total}, about ${r.est}`).join("; ") }));
+      return;
+    }
+    const t = fxRun;
+    if (t.done) {
+      const r = t.result;
+      const card = el("div", { class: "tr-card", id: "fx-check-sum" }, [el("h3", { text: `About ${r.est}` }), el("p", { text: r.note }), el("p", { class: "small", text: ["below", "at", "above"].map((k) => `${k === "at" ? "at your level" : k + " your level"}: ${t.res[k].correct}/${t.res[k].total}`).join("; ") + `. ${t.correct} of ${t.qs.length} right. +${t.xp} XP. This is an indication only.` }), ...badgeLines(t.badges)]);
+      const row = el("div", { class: "row" });
+      if (r.est !== c.cefr && r.verdict !== "unknown") row.appendChild(el("button", { class: "btn", id: "fx-setlevel", text: (LG.CEFR.indexOf(r.est) > LG.CEFR.indexOf(c.cefr) ? "Move up to " : "Set my level to ") + r.est, onclick: () => { if (LG.CEFR.indexOf(r.est) > LG.CEFR.indexOf(c.cefr)) state.lang.stats.ups += 1; c.cefr = r.est; lgGain(0); fxHome(); } }));
+      row.appendChild(el("button", { class: "btn", text: "Keep my level", onclick: () => fxHome() })); card.appendChild(row); box.appendChild(card); return;
+    }
+    const q = t.qs[t.i];
+    box.appendChild(fxChoiceCard(q, c.tag, (ok) => { const k = q.tier; t.res[k].total += 1; if (ok) { t.res[k].correct += 1; t.correct += 1; } t.i += 1; if (t.i >= t.qs.length) lgCheckFinish(c); else renderLang(); }, { head: `Question ${t.i + 1} of ${t.qs.length}`, last: t.i + 1 >= t.qs.length }));
+  }
+  async function lgCheckStart(c) {
+    await fxBusy(`Writing a ${c.cefr} check…`, async () => {
+      fxNeed(c);
+      const qs = FX.parseLevel(await callGemini(FX.buildLevelPrompt({ course: c, cefr: c.cefr })), {});
+      if (!qs) throw new Error("The check could not be read. Press the button again.");
+      lgMsg("Having a second check solve each question…");
+      const r = await fxBlindCheck(c, qs);
+      const by = { below: 0, at: 0, above: 0 }; for (const q of r.kept) by[q.tier] += 1;
+      if (r.kept.length < 9 || by.at < 3) throw new Error("Too many questions failed the check. Press the button again for a fresh one.");
+      const ordered = ["below", "at", "above"].flatMap((k) => r.kept.filter((q) => q.tier === k));
+      fxRun = { kind: "check", qs: ordered, i: 0, correct: 0, xp: 0, done: false, res: { below: { correct: 0, total: 0 }, at: { correct: 0, total: 0 }, above: { correct: 0, total: 0 } }, unreviewed: r.unreviewed };
+      lgMsg(r.unreviewed ? "The second check could not run, so these questions are unchecked." : "");
+    });
+  }
+  function lgCheckFinish(c) {
+    const t = fxRun; t.done = true; t.result = FX.estimateLevel(c.cefr, t.res); t.xp = 30; state.lang.stats.checks += 1;
+    fxOf(c).checks.push({ cefr: c.cefr, est: t.result.est, correct: t.correct, total: t.qs.length, at: LG.dayKey() }); fxOf(c).checks = fxOf(c).checks.slice(-30);
+    t.badges = lgGain(t.xp); renderLang();
   }
 
   function wireLang() {
