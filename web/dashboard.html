@@ -245,6 +245,14 @@
   .tr-badge.strong { background: var(--carbon); color: var(--paper, #fff); }
   .tr-badge.missing { border-style: dashed; }
   .tr-req { padding: 8px 0; border-bottom: 1px solid var(--carbon); max-width: 760px; font-size: 12.5px; }
+  .nl-term { border: 1px solid var(--carbon); background: #1d1d19; color: #E8E1C8; padding: 8px 10px; height: 340px; overflow: auto; font-size: 12.5px; margin-top: 8px; }
+  .nl-out { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; font: inherit; color: #CFC8AC; }
+  .nl-line { display: flex; gap: 0; align-items: center; background: #1d1d19; color: #E8E1C8; border: 1px solid var(--carbon); border-top: 0; padding: 4px 10px; margin: 0; font-size: 12.5px; }
+  .nl-prompt { white-space: pre; }
+  input.nl-in[type=text] { flex: 1; min-width: 0; width: auto; background: transparent; color: inherit; border: 0; outline: 0; box-shadow: none; font: inherit; padding: 2px 0; margin: 0; }
+  .nl-line:focus-within { outline: 2px solid var(--focus); }
+  .nl-tabs .btn.nl-on { background: var(--carbon); color: var(--paper); }
+  @media (max-width: 640px) { .nl-term { height: 260px; } }
   .tr-card { border: 1px solid var(--carbon); padding: 12px 14px; margin: 10px 0; max-width: 780px; }
   .tr-card h4 { margin: 0 0 6px; }
   .tr-art { white-space: pre; overflow-x: auto; border: 1px solid var(--carbon); padding: 8px 10px; font-size: 12px; line-height: 1.5; background: rgba(0,0,0,.03); }
@@ -462,6 +470,10 @@
 
     <section id="view-train" role="tabpanel" aria-labelledby="tab-train" hidden>
       <p class="small" style="max-width:70ch">Practice for the interview and the tests that follow an application. Pick a saved role or a PhD programme. Questions, practical tasks and follow-ups are built from that posting or advert and checked against your own CV and background, so the practice is aimed at what you will really be asked and where you are really weak. Your answers go to Gemini with your own key. Progress stays in this browser.</p>
+      <div class="pack" id="nl-pack">
+        <h4>Hands-on network labs</h4>
+        <div id="nl-host"></div>
+      </div>
       <div class="pack" id="tr-setup">
         <label for="tr-target">Practise for</label>
         <select id="tr-target" aria-label="Role or programme to practise for"></select>
@@ -612,6 +624,13 @@
   <script src="./lib/outlook.js"></script>
   <script src="./lib/lang.js"></script>
   <script src="./lib/fluency.js"></script>
+  <script src="./lib/netsim.js"></script>
+  <script src="./lib/netcli.js"></script>
+  <script src="./lib/netios.js"></script>
+  <script src="./lib/netjunos.js"></script>
+  <script src="./lib/netlinux.js"></script>
+  <script src="./lib/netlabs.js"></script>
+  <script src="./lib/netlabui.js"></script>
   <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
