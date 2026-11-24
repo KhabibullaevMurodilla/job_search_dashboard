@@ -8,6 +8,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <style>
+    .pt-skills{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:10px 0}
+    .pt-row{border:1px solid var(--rule);padding:8px;display:flex;flex-direction:column;gap:4px}
+    .pt-name{font-weight:bold}
+    .pt-check{align-self:flex-start;margin-top:4px}
   /*
     DESIGN — "Case File"
     This page triages job postings the way a caseworker triages a stack of
@@ -473,6 +477,10 @@
 
     <section id="view-train" role="tabpanel" aria-labelledby="tab-train" hidden>
       <p class="small" style="max-width:70ch">Practice for the interview and the tests that follow an application. Pick a saved role or a PhD programme. Questions, practical tasks and follow-ups are built from that posting or advert and checked against your own CV and background, so the practice is aimed at what you will really be asked and where you are really weak. Your answers go to Gemini with your own key. Progress stays in this browser.</p>
+      <div class="pack" id="pt-pack">
+        <h4>Path to expert</h4>
+        <div id="pt-host"></div>
+      </div>
       <div class="pack" id="nl-pack">
         <h4>Hands-on network labs</h4>
         <div id="nl-host"></div>
@@ -643,6 +651,8 @@
   <script src="./lib/codetasks.js"></script>
   <script src="./lib/coderun.js"></script>
   <script src="./lib/codelabui.js"></script>
+  <script src="./lib/path.js"></script>
+  <script src="./lib/pathui.js"></script>
   <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
