@@ -70,7 +70,7 @@
   const adFor = (d, p, ebgp) => (d.os === "junos" ? ({ S: 5, O: 10, E2: 150, B: 170 })[p] : ({ S: 1, O: 110, E2: 110, B: ebgp ? 20 : 200 })[p]);
 
   // ------------------------------------------------------------ compute
-  function compute(net) {
+  function computeCore(net, opts) {
     const R = { net, line: {}, att: [], adj: [], ospf: {}, bgp: {}, bgpTable: {}, rib: {}, events: {}, seg: {} };
     const names = Object.keys(net.devices);
     for (const n of names) { R.line[n] = {}; R.events[n] = []; R.ospf[n] = { nbrs: [], ifs: {}, rid: null }; R.bgp[n] = {}; R.bgpTable[n] = {}; R.rib[n] = []; }
@@ -78,18 +78,19 @@
 
     // 1. interface state ----------------------------------------------------
     const vlanActive = (d, v) => d.vlans[v] !== undefined;
+    const ovlUp = (d, v) => !!(d.vxlan && d.vxlan.nve && d.ifs[d.vxlan.nve.ifc] && !d.ifs[d.vxlan.nve.ifc].shutdown && d.vxlan.vlanVni && d.vxlan.vlanVni[v] && d.vlans[v] !== undefined);
     for (const n of names) {
       const d = net.devices[n];
       for (const nm of d.order) {
         const i = d.ifs[nm]; let line = false;
         if (i.loopback) line = !i.shutdown;
-        else if (i.svi) line = !i.shutdown && vlanActive(d, i.svi) && d.order.some((p) => { const q = d.ifs[p]; if (q.shutdown || !isSwitchport(q) || !R.line[n][p]) return false; const pe = peerOf(net, n, p); if (!pe) return false; return q.mode === "access" ? q.accessVlan === i.svi : (q.allowed === null || q.allowed.indexOf(i.svi) >= 0); });
+        else if (i.svi) line = !i.shutdown && vlanActive(d, i.svi) && (ovlUp(d, i.svi) || d.order.some((p) => { const q = d.ifs[p]; if (q.shutdown || !isSwitchport(q) || !R.line[n][p]) return false; const pe = peerOf(net, n, p); if (!pe) return false; return q.mode === "access" ? q.accessVlan === i.svi : (q.allowed === null || q.allowed.indexOf(i.svi) >= 0); }));
         else if (i.sub) { line = !i.shutdown && !!R.line[n][i.parent]; }
         else { const pe = peerOf(net, n, nm); line = !i.shutdown && !!pe && pe.link.up !== false && !net.devices[pe.dev].ifs[pe.ifc].shutdown; }
         R.line[n][nm] = line;
       }
       // svis depend on switch ports computed above; recompute once
-      for (const nm of d.order) { const i = d.ifs[nm]; if (i.svi) R.line[n][nm] = !i.shutdown && vlanActive(d, i.svi) && d.order.some((p) => { const q = d.ifs[p]; if (q.shutdown || !isSwitchport(q) || !R.line[n][p]) return false; return q.mode === "access" ? q.accessVlan === i.svi : (q.allowed === null || q.allowed.indexOf(i.svi) >= 0); }); if (i.sub) R.line[n][nm] = !i.shutdown && !!R.line[n][i.parent]; }
+      for (const nm of d.order) { const i = d.ifs[nm]; if (i.svi) R.line[n][nm] = !i.shutdown && vlanActive(d, i.svi) && (ovlUp(d, i.svi) || d.order.some((p) => { const q = d.ifs[p]; if (q.shutdown || !isSwitchport(q) || !R.line[n][p]) return false; return q.mode === "access" ? q.accessVlan === i.svi : (q.allowed === null || q.allowed.indexOf(i.svi) >= 0); })); if (i.sub) R.line[n][nm] = !i.shutdown && !!R.line[n][i.parent]; }
     }
 
     // 2. layer-2 segments -------------------------------------------------
@@ -124,6 +125,7 @@
       for (const nm of dev(rd).order) { const q = dev(rd).ifs[nm]; if (q.sub && q.parent === sw.other.ifc && s.tagged[q.sub]) union(s.tagged[q.sub], attOf(rd, nm)); }
     });
     for (const n of names) { const d = dev(n); for (const nm of d.order) { const i = d.ifs[nm]; if (i.svi && R.line[n][nm]) union(an(n, nm), vn(n, i.svi)); } }
+    for (const u of (opts && opts.unions) || []) union(vn(u[0].dev, u[0].vlan), vn(u[1].dev, u[1].vlan));
     // attachments
     for (const n of names) { const d = dev(n); for (const nm of d.order) { const i = d.ifs[nm]; if (!i.ip || !R.line[n][nm]) continue; if (isSwitchport(i)) continue; R.att.push({ dev: n, ifc: nm, ip: i.ip.addr, len: i.ip.len, node: i.loopback ? `lo|${n}|${nm}` : an(n, nm) }); } }
     for (const a of R.att) a.seg = find(a.node);
@@ -304,7 +306,7 @@
       let out = null, hopIp = dstIp;
       if (r.proto === "C") out = r.ifc; else { const rs = R.resolveFinal(cur, r.nh); if (!rs) return { ok: false, hops, fail: { kind: "noroute", at: cur } }; out = rs.ifc; hopIp = n2ip(rs.hop); }
       if (!aclPermits(D, D.ifs[out].acl.out, pkt)) return { ok: false, hops, fail: { kind: "acl", at: cur, ifc: out, dir: "out" } };
-      const myAtt = R.attOf(cur, out); const next = R.att.find((a) => a.seg === myAtt.seg && a.dev !== cur && a.ip === hopIp);
+      const myAtt = R.attOf(cur, out); const cands = R.att.filter((a) => a.seg === myAtt.seg && a.dev !== cur && a.ip === hopIp); const next = cands.find((a) => net.links.some((l) => (l.a.dev === cur && l.b.dev === a.dev) || (l.b.dev === cur && l.a.dev === a.dev))) || cands[0];
       if (!next) return { ok: false, hops, fail: { kind: "arp", at: cur, ifc: out, ip: hopIp } };
       const ND = net.devices[next.dev];
       if (!aclPermits(ND, ND.ifs[next.ifc].acl.in, pkt)) return { ok: false, hops, fail: { kind: "acl", at: next.dev, ifc: next.ifc, dir: "in" } };
@@ -323,6 +325,11 @@
     const b = walk(R, f.last, srcIp, dstIp, { proto: o.proto || "icmp", port: null });
     if (!b.ok) return { ok: false, srcIp, hops: f.hops, fail: { kind: "timeout", at: b.fail.at, back: b.fail }, replied: false };
     return { ok: true, srcIp, hops: f.hops, back: b.hops, replier: f.last };
+  }
+  function compute(net) {
+    const R = computeCore(net);
+    if (api.overlay && Object.values(net.devices).some((d) => d.vxlan)) { const o = api.overlay(R); R.evpn = o.info; if (o.unions.length) { const R2 = computeCore(net, { unions: o.unions }); R2.evpn = o.info; return R2; } }
+    return R;
   }
   function neighbors(net, d) { const out = []; const D = net.devices[d]; for (const nm of D.order) { const pe = peerOf(net, d, nm); if (pe && pe.link.up !== false) out.push({ ifc: nm, peerDev: pe.dev, peerIf: pe.ifc }); } return out; }
 
