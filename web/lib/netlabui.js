@@ -10,6 +10,7 @@
     const el = env.el, lsGet = env.lsGet, lsSet = env.lsSet, doc = host.ownerDocument;
     let lab = null, sessions = {}, cur = null, out = {}, hist = {}, hpos = {}, shownHints = 0, revealed = false, msg = "", verdict = null;
     const stats = () => lsGet(SKEY, {}) || {};
+    const report = (pass) => { if (!env.onResult || !lab) return; try { env.onResult({ kind: "net", scenario: lab.scenario, fault: lab.faultId, double: !!(lab.opts && lab.opts.double), pass, hints: lab.used || 0, cmds: lab.cmds || 0, vendors: lab.vendors || [] }); } catch (e) { /* the path must never break a lab */ } };
     function save() { if (!lab) return; try { lsSet(KEY, Object.assign(Labs.serialise(lab), { opts: lab.opts, shown: shownHints, revealed })); } catch (e) { /* storage full or blocked */ } }
     function start(scenario, seed, opts, saved) {
       lab = Labs.create(scenario, seed, opts); sessions = {}; out = {}; hist = {}; hpos = {}; verdict = null; msg = "";
@@ -58,7 +59,7 @@
     }
     function check() {
       const v = Labs.verify(lab); verdict = v;
-      if (v.solved && !lab.solved) { lab.solved = true; const st = stats(); const k = lab.scenario; st[k] = st[k] || { solved: 0, best: 0, byFault: {} }; st[k].solved++; const sc = revealed ? 0 : Labs.score(lab); st[k].best = Math.max(st[k].best, sc); st[k].byFault[lab.faultId] = (st[k].byFault[lab.faultId] || 0) + 1; lsSet(SKEY, st); }
+      if (v.solved && !lab.solved) { lab.solved = true; report(!revealed); const st = stats(); const k = lab.scenario; st[k] = st[k] || { solved: 0, best: 0, byFault: {} }; st[k].solved++; const sc = revealed ? 0 : Labs.score(lab); st[k].best = Math.max(st[k].best, sc); st[k].byFault[lab.faultId] = (st[k].byFault[lab.faultId] || 0) + 1; lsSet(SKEY, st); }
       save(); render();
     }
     function render(keepFocus) {
@@ -81,7 +82,7 @@
       const act = el("div", { class: "row" }, [
         el("button", { class: "btn", id: "nl-hint", text: shownHints < lab.hints.length ? `Hint (${shownHints}/${lab.hints.length}, costs points)` : "No more hints", disabled: shownHints >= lab.hints.length || lab.solved ? "disabled" : undefined, onclick: () => { shownHints++; lab.used = shownHints; save(); render(true); } }),
         el("button", { class: "btn", id: "nl-check", text: "Check my fix", onclick: check }),
-        el("button", { class: "btn", id: "nl-reveal", text: "Show the cause", onclick: () => { if (!revealed && !lab.solved && !root.confirm("Show the cause and give up scoring on this lab?")) return; revealed = true; save(); render(true); } }),
+        el("button", { class: "btn", id: "nl-reveal", text: "Show the cause", onclick: () => { if (!revealed && !lab.solved && !root.confirm("Show the cause and give up scoring on this lab?")) return; if (!revealed && !lab.solved) report(false); revealed = true; save(); render(true); } }),
       ]);
       host.appendChild(act); host.appendChild(hints);
       if (verdict) { const ok = verdict.solved; host.appendChild(el("div", { class: "tr-card", role: "status" }, [el("h4", { text: ok ? `Fixed. Score ${revealed ? "0 (cause was shown)" : Labs.score(lab)}/100` : "Not fixed yet" }), ok ? el("p", { text: `${lab.cmds} commands, ${lab.used} hint${lab.used === 1 ? "" : "s"}.` }) : el("ul", {}, verdict.problems.slice(0, 6).map((p) => el("li", { text: p })))])); }
