@@ -86,7 +86,7 @@
       host.appendChild(act); host.appendChild(hints);
       if (verdict) { const ok = verdict.solved; host.appendChild(el("div", { class: "tr-card", role: "status" }, [el("h4", { text: ok ? `Fixed. Score ${revealed ? "0 (cause was shown)" : Labs.score(lab)}/100` : "Not fixed yet" }), ok ? el("p", { text: `${lab.cmds} commands, ${lab.used} hint${lab.used === 1 ? "" : "s"}.` }) : el("ul", {}, verdict.problems.slice(0, 6).map((p) => el("li", { text: p })))])); }
       if (revealed || lab.solved) host.appendChild(el("div", { class: "tr-card" }, [el("h4", { text: `Cause: ${lab.faultTitle}` }), el("p", { text: lab.why })]));
-      if (keepFocus) { const i = host.querySelector("#nl-in"); if (i) { i.focus(); const b = host.querySelector("#nl-term"); if (b) b.scrollTop = b.scrollHeight; } }
+      if (keepFocus) { const i = host.querySelector("#nl-in"); if (i) { i.focus(); const b = host.querySelector("#nl-term"), fix = () => { if (b) b.scrollTop = b.scrollHeight; }; fix(); if (root.setTimeout) root.setTimeout(fix, 0); } }
     }
     try { const sv = lsGet(KEY, null); if (sv && sv.scenario && sv.seed) { start(sv.scenario, sv.seed, sv.opts || {}, sv); return { start, state: () => lab }; } } catch (e) { /* ignore a bad save */ }
     render(); return { start, state: () => lab };
