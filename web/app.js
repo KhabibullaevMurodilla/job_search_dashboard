@@ -3117,9 +3117,10 @@ copied from the account either. Write in a professional register.`;
     box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-clear", text: "Clear my practice history", onclick: () => { if (window.confirm("Delete all practice scores and readiness maps?")) { state.train = TR.newStats(); openLesson = null; saveTrain(); round = null; renderTrain(); } } })]));
   }
 
-  let nlMounted = false;
+  let nlMounted = false, clMounted = false;
   function renderTrain() {
     if (!tq("tr-target")) return;
+    if (!clMounted && tq("cl-host") && window.Codelabui) { clMounted = true; window.Codelabui.mount(tq("cl-host"), { el, lsGet, lsSet, callGemini: (p) => callGemini(p), runner: window.__coderunStub }); }
     if (!nlMounted && tq("nl-host") && window.Netlabui) { nlMounted = true; window.Netlabui.mount(tq("nl-host"), { el, lsGet, lsSet }); }
     const sel = tq("tr-target"), keep = sel.value;
     sel.textContent = "";
