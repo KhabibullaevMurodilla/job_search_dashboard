@@ -103,15 +103,18 @@
   const ospfStateStr = (R, d, nb, style) => { if (nb.state !== "FULL") return nb.state + "/  -"; const me = R.ospf[d].rid, other = nb.id; const dr = ip2n(me) > ip2n(other) ? "BDR" : "DR"; const i = R.net.devices[d].ifs[nb.iface]; if (i.ospf.type === "p2p") return "FULL/  -"; return "FULL/" + dr; };
 
   // ------------------------------------------------------------ running config rendering
+  const cfgx = {};
   function runConfig(net, d, style) {
     const D = net.devices[d], L = [];
     L.push(style === "eos" ? "! Command: show running-config" : "Building configuration...\n\nCurrent configuration : 1024 bytes\n!");
     L.push("!"); L.push(`hostname ${D.hostname}`); L.push("!");
     if (style === "nxos") { const f = []; if (D.ospf) f.push("feature ospf"); if (D.bgp) f.push("feature bgp"); if (Object.values(D.ifs).some((i) => i.svi)) f.push("feature interface-vlan"); f.forEach((x) => L.push(x)); L.push("!"); }
-    for (const v of Object.keys(D.vlans).map(Number).sort((a, b) => a - b)) if (v !== 1) { L.push(`vlan ${v}`); L.push(` name ${D.vlans[v]}`); L.push("!"); }
+    for (const v of Object.keys(D.vlans).map(Number).sort((a, b) => a - b)) if (v !== 1) { L.push(`vlan ${v}`); L.push(` name ${D.vlans[v]}`); if (cfgx.vlan) cfgx.vlan(D, v, style, L); L.push("!"); }
+    if (cfgx.top) cfgx.top(D, style, L);
     for (const [nm, ac] of Object.entries(D.acls)) { L.push(`ip access-list extended ${nm}`); ac.forEach((e, k) => { const sp = (s) => (s === "any" ? "any" : s.host ? "host " + s.host : n2ip(s.ip) === undefined ? "" : s.ip + " " + n2ip((~lenMask(s.len)) >>> 0)); L.push(` ${style === "ios" ? "" : (k + 1) * 10 + " "}${e.action} ${e.proto} ${sp(e.src)} ${sp(e.dst)}${e.port ? " eq " + e.port : ""}`); }); L.push("!"); }
     for (const nm of D.order) {
       const i = D.ifs[nm]; L.push(`interface ${nm}`);
+      if (i.virtual) { if (cfgx.iface) cfgx.iface(D, i, style, L); L.push(i.shutdown ? " shutdown" : style === "nxos" ? " no shutdown" : null); L.push("!"); continue; }
       if (i.desc) L.push(` description ${i.desc}`);
       if (i.sub) L.push(` encapsulation dot1Q ${i.sub}`);
       if (style !== "ios" && !N.isSwitchport(i) && !i.loopback && !i.svi && !i.sub && D.role === "switch") L.push(" no switchport");
@@ -123,6 +126,7 @@
       if (D.ospf && i.ospf.area !== null) L.push(style === "nxos" ? ` ip router ospf ${D.ospf.pid} area ${i.ospf.area}` : ` ip ospf ${D.ospf.pid} area ${i.ospf.area}`);
       if (i.ospf.cost) L.push(` ip ospf cost ${i.ospf.cost}`); if (i.ospf.hello !== 10) L.push(` ip ospf hello-interval ${i.ospf.hello}`); if (i.ospf.dead !== 40) L.push(` ip ospf dead-interval ${i.ospf.dead}`);
       if (i.ospf.type === "p2p") L.push(" ip ospf network point-to-point"); if (i.ospf.auth) L.push(` ip ospf authentication-key ${i.ospf.auth}`); if (i.ospf.mtuIgnore) L.push(" ip ospf mtu-ignore");
+      if (cfgx.iface) cfgx.iface(D, i, style, L);
       L.push(i.shutdown ? " shutdown" : (style === "ios" || style === "nxos") && !i.loopback ? " no shutdown" : null); L.push("!");
     }
     if (D.ospf) { L.push(`router ospf ${D.ospf.pid}`); if (D.ospf.rid) L.push(` router-id ${D.ospf.rid}`); for (const w of D.ospf.networks) L.push(` network ${w.ip} ${w.wild} area ${w.area}`); if (D.ospf.defaultPassive) L.push(" passive-interface default"); (D.ospf.nonPassive || []).forEach((x) => L.push(` no passive-interface ${x}`)); (D.ospf.passive || []).forEach((x) => L.push(` passive-interface ${x}`)); const rd = D.ospf.redist || {}; if (rd.static) L.push(" redistribute static subnets"); if (rd.connected) L.push(" redistribute connected subnets"); if (rd.bgp) L.push(" redistribute bgp " + (D.bgp ? D.bgp.asn : "") + " subnets"); L.push("!"); }
@@ -130,7 +134,7 @@
       for (const [ip, nb] of Object.entries(B.neighbors)) { L.push(` neighbor ${ip} remote-as ${nb.remoteAs}`); if (nb.desc) L.push(` neighbor ${ip} description ${nb.desc}`); if (nb.updateSource) L.push(` neighbor ${ip} update-source ${nb.updateSource}`); if (nb.multihop) L.push(` neighbor ${ip} ebgp-multihop ${nb.multihop}`); if (nb.password) L.push(` neighbor ${ip} password ${nb.password}`); if (nb.shutdown) L.push(` neighbor ${ip} shutdown`); }
       L.push(" !"); L.push(" address-family ipv4"); for (const nw of B.networks || []) L.push(`  network ${nw.ip} mask ${maskOf(nw.len)}`); const rd = B.redist || {}; for (const k of ["connected", "static", "ospf"]) if (rd[k]) L.push(`  redistribute ${k}${k === "ospf" ? " 1" : ""}`);
       for (const [ip, nb] of Object.entries(B.neighbors)) { L.push(`  neighbor ${ip} activate`); if (nb.nhs) L.push(`  neighbor ${ip} next-hop-self`); if (nb.rrClient) L.push(`  neighbor ${ip} route-reflector-client`); if (nb.rmIn) L.push(`  neighbor ${ip} route-map ${nb.rmIn} in`); if (nb.rmOut) L.push(`  neighbor ${ip} route-map ${nb.rmOut} out`); if (nb.prefixIn) L.push(`  neighbor ${ip} prefix-list ${nb.prefixIn} in`); if (nb.prefixOut) L.push(`  neighbor ${ip} prefix-list ${nb.prefixOut} out`); }
-      L.push(" exit-address-family"); L.push("!"); }
+      L.push(" exit-address-family"); if (cfgx.bgp) cfgx.bgp(D, style, L); L.push("!"); }
     for (const s of D.statics) L.push(`ip route ${s.pfx} ${maskOf(s.len)} ${s.nh}${s.ad && s.ad !== 1 ? " " + s.ad : ""}`);
     if (D.statics.length) L.push("!");
     for (const [nm, list] of Object.entries(D.prefixLists)) for (const e of list) L.push(`ip prefix-list ${nm} seq ${e.seq} ${e.action} ${e.pfx}/${e.len}${e.ge ? " ge " + e.ge : ""}${e.le ? " le " + e.le : ""}`);
@@ -169,7 +173,7 @@
   Session.prototype.R = function () { const net = this.net; if (!net._R || net._rev !== net._Rrev) { net._R = N.compute(net); net._Rrev = net._rev; } return net._R; };
   Session.prototype.touch = function () { this.net._rev = (this.net._rev || 0) + 1; };
 
-  const api = { N, pad, padL, hash, upt, maskOf, resolveIf, short, compile, dispatch, matchEntry, caretErr, ribRows, showRouteIos, ospfStateStr, runConfig, logLines, ifStatus, Session, CODE };
+  const api = { N, pad, padL, hash, upt, maskOf, resolveIf, short, compile, dispatch, matchEntry, caretErr, ribRows, showRouteIos, ospfStateStr, runConfig, logLines, ifStatus, Session, CODE, cfgx };
   root.Netcli = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : globalThis);
