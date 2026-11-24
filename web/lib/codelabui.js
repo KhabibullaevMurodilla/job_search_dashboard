@@ -12,6 +12,8 @@
     const runner = env.runner || Run.browserRunner();
     let st = lsGet(KEY, null) || {}; st.drafts = st.drafts || {}; st.solved = st.solved || {}; st.last = st.last || { id: Tasks.TASKS[0].id, lang: "py" }; st.hints = st.hints || {}; st.viewed = st.viewed || {};
     let result = null, busy = false, note = "", review = "", status = "idle";
+    const reported = {};
+    const report = (pass) => { if (!env.onResult) return; try { env.onResult({ kind: "code", task: st.last.id, lang: st.last.lang, pass, hints: st.hints[dk()] || 0 }); } catch (e) { /* the path must never break a lab */ } };
     const save = () => { try { lsSet(KEY, st); } catch (e) { /* storage may be blocked */ } };
     const task = () => Tasks.byId(st.last.id) || Tasks.TASKS[0];
     const dk = () => st.last.id + "|" + st.last.lang;
@@ -23,7 +25,7 @@
       busy = true; result = null; note = ""; review = ""; render();
       const r = await Run.grade(task(), st.last.lang, code(), runner, { visibleOnly: !hidden });
       busy = false; result = Object.assign({ hidden }, r);
-      if (hidden && r.ok && r.allPassed) { const s = (st.solved[st.last.id] = st.solved[st.last.id] || {}); if (!s[st.last.lang]) s[st.last.lang] = { at: Date.now(), hints: st.hints[dk()] || 0, viewed: !!st.viewed[dk()] }; }
+      if (hidden && r.ok && r.allPassed) { if (!reported[dk()]) { reported[dk()] = true; report(!st.viewed[dk()]); } const s = (st.solved[st.last.id] = st.solved[st.last.id] || {}); if (!s[st.last.lang]) s[st.last.lang] = { at: Date.now(), hints: st.hints[dk()] || 0, viewed: !!st.viewed[dk()] }; }
       save(); render(true);
     }
     function listing() {
@@ -66,7 +68,7 @@
         el("button", { class: "btn", id: "cl-run", text: "Run examples", disabled: busy ? "disabled" : undefined, onclick: () => go(false) }),
         el("button", { class: "btn", id: "cl-submit", text: "Submit (all tests)", disabled: busy ? "disabled" : undefined, onclick: () => go(true) }),
         el("button", { class: "btn", id: "cl-hint", text: hn < t.hints.length ? `Hint (${hn}/${t.hints.length})` : "No more hints", disabled: hn >= t.hints.length ? "disabled" : undefined, onclick: () => { st.hints[dk()] = hn + 1; save(); render(); } }),
-        el("button", { class: "btn", id: "cl-model", text: "Model solution", onclick: () => { if (!st.viewed[dk()] && !root.confirm("Show the model solution? Try the hints first.")) return; st.viewed[dk()] = true; save(); render(); } }),
+        el("button", { class: "btn", id: "cl-model", text: "Model solution", onclick: () => { if (!st.viewed[dk()] && !root.confirm("Show the model solution? Try the hints first.")) return; if (!st.viewed[dk()] && !reported[dk()] && !(st.solved[st.last.id] && st.solved[st.last.id][st.last.lang])) { reported[dk()] = true; report(false); } st.viewed[dk()] = true; save(); render(); } }),
         el("button", { class: "btn", id: "cl-reset", text: "Reset code", onclick: () => { if (!root.confirm("Replace your code with the starter?")) return; delete st.drafts[dk()]; result = null; save(); render(); } }),
       ]));
       for (let i = 0; i < hn; i++) host.appendChild(el("div", { class: "note", text: `Hint ${i + 1}: ${t.hints[i]}` }));
@@ -78,7 +80,8 @@
       }
       if (focusRes) { const r = host.querySelector("#cl-result, #cl-status"); if (r && r.scrollIntoView) { try { r.scrollIntoView({ block: "nearest" }); } catch (e) { /* ok */ } } }
     }
-    render(); return { render, state: () => st };
+    function open(id, lang) { if (!Tasks.byId(id)) return false; st.last = { id, lang: lang === "js" ? "js" : "py" }; delete reported[dk()]; result = null; review = ""; save(); render(); return true; }
+    render(); return { render, open, state: () => st };
   }
   const api = { mount }; root.Codelabui = api; if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : globalThis);
