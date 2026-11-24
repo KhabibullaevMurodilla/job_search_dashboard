@@ -251,11 +251,36 @@
     },
   };
 
-  function pickFault(rnd, list, o) { const ok = list.filter((f) => f.ok && (!o || !o.fault || f.id === o.fault)); return ok[Math.floor(rnd() * ok.length)] || list[0]; }
+  function pickFault(rnd, list, o) { const ok = list.filter((f) => f.ok && (!o || !o.fault || f.id === o.fault)); const f = ok[Math.floor(rnd() * ok.length)] || list[0]; f.all = list; return f; }
+  // Every fault with the difficulty tier (1 easiest .. 4 hardest) the training path uses.
+  const TIERS = {
+    ospf: { shut: 1, passive: 1, network: 1, hello: 2, area: 2, mtu: 2, auth: 3, rid: 3 },
+    bgp: { remoteas: 1, noneighbor: 1, shut: 1, network: 2, password: 2, updsrc: 3, multihop: 3 },
+    ibgp: { nhs: 3, updsrc: 3, ospfloop: 4 },
+    vlan: { access: 1, shut: 1, allowed: 2, novlan: 2 },
+    static: { fwd: 1, ret: 1, nexthop: 2, gw: 2, acl: 3 },
+    evpn: { "nve-shut": 3, "src-down": 3, "vtep-underlay": 3, "af-activate": 4, "vlan-vni-missing": 4, "vni-mismatch": 4, "member-vni": 4, "feature-evpn": 4, extcomm: 4, "rt-mismatch": 4, "no-rr": 4 },
+  };
 
   const CATALOG = Object.keys(SC).map((k) => ({ id: k, title: SC[k].title, area: SC[k].area }));
 
-  function make(sc, seed, opts, broken) { const b = sc.build(rngOf(seed), opts || {}); if (broken) b.fault.apply(); finalize(b.net); return b; }
+  // opts.double: two independent faults at once (an incident with more than one cause).
+  function make(sc, seed, opts, broken) {
+    const b = sc.build(rngOf(seed), opts || {}), f = b.fault;
+    if (opts && opts.double && f.all) {
+      const pool = f.all.filter((x) => x.ok && x.id !== f.id), r2 = rngOf(seed * 31 + 17);
+      for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(r2() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+      let first = null, second = null;
+      if (broken) { f.apply(); for (const g of pool) { try { g.apply(); second = g; break; } catch (e) { /* this pair clashes, try the next */ } } }
+      else { for (const g of pool) { const probe = sc.build(rngOf(seed), opts || {}); const pf = probe.fault, pg = pf.all.find((x) => x.id === g.id); try { pf.apply(); pg.apply(); second = g; break; } catch (e) { /* clash */ } } }
+      if (second) {
+        const hs = []; for (let i = 0; i < Math.max(f.hints.length, second.hints.length); i++) { if (f.hints[i]) hs.push(f.hints[i]); if (second.hints[i]) hs.push(second.hints[i]); }
+        b.fault = { id: f.id + "+" + second.id, title: f.title + " and " + second.title, ticket: "Two separate problems were reported. (1) " + f.ticket + " (2) " + second.ticket, hints: hs.slice(0, 6), why: f.why + " Second fault: " + second.why, apply() {} };
+      } else if (broken) { first = f; }
+      void first;
+    } else if (broken) f.apply();
+    finalize(b.net); return b;
+  }
   function create(scenario, seed, opts) {
     const sc = SC[scenario]; if (!sc) return null;
     const h = make(sc, seed, opts, false), b = make(sc, seed, opts, true);
@@ -268,6 +293,6 @@
   function score(lab) { const eff = Math.max(0, lab.cmds - 30); return Math.max(10, 100 - lab.used * 15 - Math.min(30, eff)); }
   function serialise(lab) { const n = JSON.parse(JSON.stringify(lab.net, (k, v) => (k === "_R" ? undefined : v))); return { scenario: lab.scenario, seed: lab.seed, net: n, used: lab.used, cmds: lab.cmds, solved: lab.solved, faultId: lab.faultId }; }
   function describe(lab) { return lab.net && Object.values(lab.net.devices).map((d) => `${d.name} (${NAMES[d.os]})`); }
-  const api = { CATALOG, create, verify, reference, score, serialise, describe, NAMES, finalize, sync, emitJunos, snapshot, rngOf };
+  const api = { TIERS, CATALOG, create, verify, reference, score, serialise, describe, NAMES, finalize, sync, emitJunos, snapshot, rngOf };
   root.Netlabs = api; if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof self !== "undefined" ? self : globalThis);
