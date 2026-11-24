@@ -3117,11 +3117,13 @@ copied from the account either. Write in a professional register.`;
     box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-clear", text: "Clear my practice history", onclick: () => { if (window.confirm("Delete all practice scores and readiness maps?")) { state.train = TR.newStats(); openLesson = null; saveTrain(); round = null; renderTrain(); } } })]));
   }
 
-  let nlMounted = false, clMounted = false;
+  let nlMounted = false, clMounted = false, ptMounted = false, nlH = null, clH = null, ptH = null;
   function renderTrain() {
     if (!tq("tr-target")) return;
-    if (!clMounted && tq("cl-host") && window.Codelabui) { clMounted = true; window.Codelabui.mount(tq("cl-host"), { el, lsGet, lsSet, callGemini: (p) => callGemini(p), runner: window.__coderunStub }); }
-    if (!nlMounted && tq("nl-host") && window.Netlabui) { nlMounted = true; window.Netlabui.mount(tq("nl-host"), { el, lsGet, lsSet }); }
+    const feed = (r) => { if (ptH) ptH.onResult(r); };
+    if (!clMounted && tq("cl-host") && window.Codelabui) { clMounted = true; clH = window.Codelabui.mount(tq("cl-host"), { el, lsGet, lsSet, callGemini: (p) => callGemini(p), runner: window.__coderunStub, onResult: feed }); }
+    if (!nlMounted && tq("nl-host") && window.Netlabui) { nlMounted = true; nlH = window.Netlabui.mount(tq("nl-host"), { el, lsGet, lsSet, onResult: feed }); }
+    if (!ptMounted && tq("pt-host") && window.Pathui) { ptMounted = true; ptH = window.Pathui.mount(tq("pt-host"), { el, lsGet, lsSet, startNet: (sc, seed, o) => { if (nlH) nlH.start(sc, seed, o); }, openCode: (id, lang) => { if (clH) clH.open(id, lang); } }); }
     const sel = tq("tr-target"), keep = sel.value;
     sel.textContent = "";
     const ts = trTargets();
