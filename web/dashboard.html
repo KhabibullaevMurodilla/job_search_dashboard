@@ -251,6 +251,9 @@
   .nl-prompt { white-space: pre; }
   input.nl-in[type=text] { flex: 1; min-width: 0; width: auto; background: transparent; color: inherit; border: 0; outline: 0; box-shadow: none; font: inherit; padding: 2px 0; margin: 0; }
   .nl-line:focus-within { outline: 2px solid var(--focus); }
+  textarea.cl-code { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13px; line-height: 1.45; background: #1d1d19; color: #E8E1C8; border: 1px solid var(--carbon); padding: 8px 10px; margin: 8px 0; tab-size: 4; resize: vertical; }
+  textarea.cl-code:focus { outline: 2px solid var(--focus); }
+  .cl-pre { background: #1d1d19; color: #E8E1C8; padding: 6px 8px; overflow-x: auto; }
   .nl-tabs .btn.nl-on { background: var(--carbon); color: var(--paper); }
   @media (max-width: 640px) { .nl-term { height: 260px; } }
   .tr-card { border: 1px solid var(--carbon); padding: 12px 14px; margin: 10px 0; max-width: 780px; }
@@ -474,6 +477,11 @@
         <h4>Hands-on network labs</h4>
         <div id="nl-host"></div>
       </div>
+      <div class="pack" id="cl-pack">
+        <h4>Coding lab: network automation</h4>
+        <p class="small" style="max-width:70ch">Write real code in Python or JavaScript. It runs in your browser against the examples and against hidden tests (edge cases and fresh random inputs each time), so an answer cannot be hard-coded. Python needs a one-time download of the Python runtime.</p>
+        <div id="cl-host"></div>
+      </div>
       <div class="pack" id="tr-setup">
         <label for="tr-target">Practise for</label>
         <select id="tr-target" aria-label="Role or programme to practise for"></select>
@@ -629,8 +637,12 @@
   <script src="./lib/netios.js"></script>
   <script src="./lib/netjunos.js"></script>
   <script src="./lib/netlinux.js"></script>
+  <script src="./lib/netevpn.js"></script>
   <script src="./lib/netlabs.js"></script>
   <script src="./lib/netlabui.js"></script>
+  <script src="./lib/codetasks.js"></script>
+  <script src="./lib/coderun.js"></script>
+  <script src="./lib/codelabui.js"></script>
   <script src="./lib/training.js"></script>
 <script src="./app.js"></script>
 </body>
