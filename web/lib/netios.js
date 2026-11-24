@@ -5,6 +5,7 @@
   "use strict";
   const C = root.Netcli || (typeof require !== "undefined" ? require("./netcli.js") : null);
   const { N, pad, padL, hash, upt, maskOf, resolveIf, short, compile, dispatch, caretErr, ribRows, showRouteIos, ospfStateStr, runConfig, logLines, ifStatus, Session } = C;
+  const NEWM = ["evpn", "evpnvni", "nbr", "nbraf", "macvrf"];
   const { ip2n, n2ip, lenMask, maskLen, wildLen, netOf, inNet } = N;
 
   const EX = ["user", "priv"], SHOW = ["user", "priv"], PRIV = ["priv"], CFG = ["config"], IF = ["if"], OSPF = ["ospf"], BGP = ["bgp", "af"];
@@ -221,12 +222,14 @@
     E("hostname <h>", CFG, (c, a) => { c.D.hostname = a.h; return OK; });
     E("feature <f>", CFG, (c, a) => { if (c.style !== "nxos") return "% Invalid input detected at '^' marker."; c.D.features = c.D.features || {}; c.D.features[a.f] = true; c.s.touch(); return OK; });
     E("no feature <f>", CFG, (c, a) => { if (c.style !== "nxos") return "% Invalid input detected at '^' marker."; (c.D.features = c.D.features || {})[a.f] = false; c.s.touch(); return OK; });
-    E("interface|int <i>", CFG.concat(IF, OSPF, BGP, ["rmap", "acl", "vlan"]), (c, a) => {
+    E("interface|int <i>", CFG.concat(IF, OSPF, BGP, ["rmap", "acl", "vlan"], NEWM), (c, a) => {
       let nm = resolveIf(c.D, a.i);
       if (!nm) { const lo = a.i.match(/^(?:loopback|lo)(\d+)$/i), vl = a.i.match(/^(?:vlan|vl)(\d+)$/i), sub = a.i.match(/^(.+)\.(\d+)$/);
         if (lo) { nm = (c.style === "nxos" ? "loopback" : "Loopback") + lo[1]; N.addIf(c.D, nm, { loopback: true, mode: "routed" }); }
         else if (vl) { if (c.style === "nxos" && !(c.D.features && c.D.features["interface-vlan"])) return "% Invalid command at '^' marker."; nm = "Vlan" + vl[1]; N.addIf(c.D, nm, { svi: +vl[1], mode: "routed", shutdown: false }); }
         else if (sub && resolveIf(c.D, sub[1])) { const par = resolveIf(c.D, sub[1]); nm = par + "." + sub[2]; N.addIf(c.D, nm, { parent: par, mode: "routed" }); }
+        else if (c.style === "nxos" && /^nve\d+$/i.test(a.i)) { if (!(c.D.vxlan && c.D.vxlan.features && c.D.vxlan.features.nv)) return "% Invalid command at '^' marker."; nm = a.i.toLowerCase(); N.addIf(c.D, nm, { loopback: true, virtual: true, mode: "routed", shutdown: true }); c.D.vxlan.nve = c.D.vxlan.nve || { ifc: nm, src: null }; }
+        else if (c.style === "eos" && /^vxlan\d+$/i.test(a.i)) { nm = "Vxlan" + a.i.match(/\d+/)[0]; N.addIf(c.D, nm, { loopback: true, virtual: true, mode: "routed", shutdown: false }); c.D.vxlan = c.D.vxlan || { features: {}, nve: null, vlanVni: {}, members: {} }; c.D.vxlan.nve = c.D.vxlan.nve || { ifc: nm, src: null }; }
         else return caretErr(c.style, c.prompt, c.line, [], 1);
       }
       c.s.mode = "if"; c.s.ctx = { ifc: nm }; c.s.touch(); return OK; });
@@ -324,7 +327,7 @@
     E("log-adjacency-changes|bgp|no bgp|maximum-paths|timers|bestpath|graceful-restart <x...>", BGP, () => OK);
 
     // --- bgp
-    E("router bgp <asn>", CFG.concat(["ospf", "bgp", "af", "if"]), (c, a) => { if (c.style === "nxos" && !(c.D.features && c.D.features.bgp)) return "% Invalid command at '^' marker."; if (!c.D.bgp) c.D.bgp = { asn: +a.asn, rid: null, neighbors: {}, networks: [], redist: {} }; else if (c.D.bgp.asn !== +a.asn) return `% BGP is already running; AS is ${c.D.bgp.asn}`; c.s.mode = "bgp"; c.s.touch(); return OK; });
+    E("router bgp <asn>", CFG.concat(["ospf", "bgp", "af", "if"], NEWM), (c, a) => { if (c.style === "nxos" && !(c.D.features && c.D.features.bgp)) return "% Invalid command at '^' marker."; if (!c.D.bgp) c.D.bgp = { asn: +a.asn, rid: null, neighbors: {}, networks: [], redist: {} }; else if (c.D.bgp.asn !== +a.asn) return `% BGP is already running; AS is ${c.D.bgp.asn}`; c.s.mode = "bgp"; c.s.touch(); return OK; });
     E("no router bgp <asn>", CFG, (c) => { c.D.bgp = null; c.s.touch(); return OK; });
     E("bgp router-id <r>", BGP, (c, a) => { c.D.bgp.rid = a.r; c.s.touch(); return OK; });
     E("neighbor <ip> remote-as <as>", BGP, (c, a) => { if (!isIp(a.ip)) return "% Invalid input detected at '^' marker."; const n = c.D.bgp.neighbors[a.ip] || (c.D.bgp.neighbors[a.ip] = {}); n.remoteAs = +a.as; c.s.touch(); return OK; });
@@ -346,10 +349,13 @@
     E("neighbor <ip> shutdown", BGP, (c, a) => { const n = nb(c, a.ip); if (!n) return nbErr; n.shutdown = true; c.s.touch(); return OK; });
     E("no neighbor <ip> shutdown", BGP, (c, a) => { const n = nb(c, a.ip); if (n) n.shutdown = false; c.s.touch(); return OK; });
     E("neighbor <ip> description <d...>", BGP, (c, a) => { const n = nb(c, a.ip); if (!n) return nbErr; n.desc = a.d; return OK; });
-    E("neighbor <ip> activate|send-community|soft-reconfiguration|timers|maximum-prefix|default-originate <x...>", BGP, (c, a) => (nb(c, a.ip) ? OK : nbErr));
-    E("neighbor <ip> activate", BGP, (c, a) => (nb(c, a.ip) ? OK : nbErr));
+    E("neighbor <ip> soft-reconfiguration|timers|maximum-prefix|default-originate <x...>", BGP, (c, a) => (nb(c, a.ip) ? OK : nbErr));
+    E("neighbor <ip> activate", BGP, (c, a) => { const n = nb(c, a.ip); if (!n) return nbErr; if (c.s.ctx.af === "evpn") { n.evpn = true; c.s.touch(); } return OK; });
+    E("neighbor <ip> send-community <x?>", BGP, (c, a) => { const n = nb(c, a.ip); if (!n) return nbErr; if (!a.x || /^(standard|both|extended|large)$/.test(a.x)) { if (/^(extended|both)$/.test(a.x || "")) n.extComm = true; c.s.touch(); return OK; } return "% Invalid input detected at '^' marker."; });
     E("no neighbor <ip>", BGP, (c, a) => { delete c.D.bgp.neighbors[a.ip]; c.s.touch(); return OK; });
-    E("address-family ipv4 <x?>", BGP, (c) => { c.s.mode = "af"; return OK; });
+    E("address-family ipv4 <x?>", BGP, (c) => { c.s.mode = "af"; c.s.ctx.af = "ipv4"; return OK; });
+    E("address-family l2vpn evpn", ["bgp"], (c) => { if (c.style !== "nxos" && c.style !== "eos") return "% Invalid input detected at '^' marker."; c.s.mode = "af"; c.s.ctx.af = "evpn"; c.s.touch(); return OK; });
+    E("address-family evpn", ["bgp"], (c) => { if (c.style !== "eos") return "% Invalid input detected at '^' marker."; c.s.mode = "af"; c.s.ctx.af = "evpn"; c.s.touch(); return OK; });
     E("exit-address-family", ["af"], (c) => { c.s.mode = "bgp"; return OK; });
     E("network <n> mask <m>", BGP, (c, a) => { const x = parseNet(a.n, a.m); if (!x) return "% Invalid input detected at '^' marker."; c.D.bgp.networks.push({ ip: n2ip(netOf(x.ip, x.len)), len: x.len }); c.s.touch(); return OK; });
     E("network <n>", BGP, (c, a) => { const x = N.cidr(a.n) || (isIp(a.n) ? { ip: a.n, len: ((a.n.split(".")[0] | 0) < 128 ? 8 : (a.n.split(".")[0] | 0) < 192 ? 16 : 24) } : null); if (!x) return "% Invalid input detected at '^' marker."; c.D.bgp.networks.push({ ip: n2ip(netOf(x.ip, x.len)), len: x.len }); c.s.touch(); return OK; });
@@ -387,8 +393,8 @@
   Session.prototype.prompt = function () {
     const D = this.d(); if (this.style === "linux") return null;
     let m = PROMPT[this.mode];
-    if (this.style === "eos") { const eos = { if: `(config-if-${short(this.ctx.ifc || "")})#`, ospf: "(config-router-ospf)#", bgp: "(config-router-bgp)#", af: "(config-router-bgp-af)#", vlan: `(config-vlan-${this.ctx.vlan})#`, rmap: "(config-route-map)#", acl: "(config-acl)#" }; if (eos[this.mode]) m = eos[this.mode]; }
-    if (this.style === "nxos") { const nx = { if: "(config-if)#", ospf: "(config-router)#", bgp: "(config-router)#", af: "(config-router-af)#" }; if (nx[this.mode]) m = nx[this.mode]; if (this.mode === "user") m = ">"; }
+    if (this.style === "eos") { const eos = { macvrf: `(config-macvlan-${this.ctx.vlan})#`, if: `(config-if-${short(this.ctx.ifc || "")})#`, ospf: "(config-router-ospf)#", bgp: "(config-router-bgp)#", af: "(config-router-bgp-af)#", vlan: `(config-vlan-${this.ctx.vlan})#`, rmap: "(config-route-map)#", acl: "(config-acl)#" }; if (eos[this.mode]) m = eos[this.mode]; }
+    if (this.style === "nxos") { const nx = { if: "(config-if)#", ospf: "(config-router)#", bgp: "(config-router)#", af: "(config-router-af)#", evpn: "(config-evpn)#", evpnvni: "(config-evpn-evi)#", nbr: "(config-router-neighbor)#", nbraf: "(config-router-neighbor-af)#" }; if (nx[this.mode]) m = nx[this.mode]; if (this.mode === "user") m = ">"; }
     return D.hostname + m;
   };
   Session.prototype.runIos = function (line) {
