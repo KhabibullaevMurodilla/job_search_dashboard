@@ -11,6 +11,11 @@
     .pt-skills{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:10px 0}
     .pt-row{border:1px solid var(--rule);padding:8px;display:flex;flex-direction:column;gap:4px}
     .pt-name{font-weight:bold}
+    .ll-ticket{border-left:3px solid var(--rule);padding-left:10px;margin:6px 0}
+    .dl-dec{border:1px solid var(--rule);margin:10px 0;padding:8px 10px}
+    .dl-opt{display:block;padding:3px 0;cursor:pointer}
+    .dl-why{margin:0 0 6px 22px}
+    textarea.dl-text{width:100%;box-sizing:border-box}
     .pt-check{align-self:flex-start;margin-top:4px}
   /*
     DESIGN — "Case File"
@@ -485,6 +490,16 @@
         <h4>Hands-on network labs</h4>
         <div id="nl-host"></div>
       </div>
+      <div class="pack" id="dl-pack">
+        <h4>Design and architecture cases</h4>
+        <p class="small" style="max-width:70ch">Vendor-neutral briefs: make the design decisions, justify them in your own words and get a scored review of every option, the ideas you covered and a reference design.</p>
+        <div id="dl-host"></div>
+      </div>
+      <div class="pack" id="ll-pack">
+        <h4>Linux service troubleshooting</h4>
+        <p class="small" style="max-width:70ch">A server with a real fault and a client machine to test from: nginx, an application service under systemd, and SSH access. Diagnose with the usual commands, fix it, then check. Some labs hide two faults.</p>
+        <div id="ll-host"></div>
+      </div>
       <div class="pack" id="cl-pack">
         <h4>Coding lab: network automation</h4>
         <p class="small" style="max-width:70ch">Write real code in Python or JavaScript. It runs in your browser against the examples and against hidden tests (edge cases and fresh random inputs each time), so an answer cannot be hard-coded. Python needs a one-time download of the Python runtime.</p>
@@ -651,6 +666,12 @@
   <script src="./lib/codetasks.js"></script>
   <script src="./lib/coderun.js"></script>
   <script src="./lib/codelabui.js"></script>
+  <script src="./lib/linuxsh.js"></script>
+  <script src="./lib/linuxsvc.js"></script>
+  <script src="./lib/linuxlabs.js"></script>
+  <script src="./lib/linuxlabui.js"></script>
+  <script src="./lib/designcases.js"></script>
+  <script src="./lib/designlabui.js"></script>
   <script src="./lib/path.js"></script>
   <script src="./lib/pathui.js"></script>
   <script src="./lib/training.js"></script>
