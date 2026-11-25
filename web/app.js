@@ -3117,13 +3117,15 @@ copied from the account either. Write in a professional register.`;
     box.appendChild(el("div", { class: "row" }, [el("button", { class: "btn", id: "tr-clear", text: "Clear my practice history", onclick: () => { if (window.confirm("Delete all practice scores and readiness maps?")) { state.train = TR.newStats(); openLesson = null; saveTrain(); round = null; renderTrain(); } } })]));
   }
 
-  let nlMounted = false, clMounted = false, ptMounted = false, nlH = null, clH = null, ptH = null;
+  let nlMounted = false, clMounted = false, ptMounted = false, dlMounted = false, llMounted = false, llH = null, nlH = null, clH = null, ptH = null, dlH = null;
   function renderTrain() {
     if (!tq("tr-target")) return;
     const feed = (r) => { if (ptH) ptH.onResult(r); };
     if (!clMounted && tq("cl-host") && window.Codelabui) { clMounted = true; clH = window.Codelabui.mount(tq("cl-host"), { el, lsGet, lsSet, callGemini: (p) => callGemini(p), runner: window.__coderunStub, onResult: feed }); }
     if (!nlMounted && tq("nl-host") && window.Netlabui) { nlMounted = true; nlH = window.Netlabui.mount(tq("nl-host"), { el, lsGet, lsSet, onResult: feed }); }
-    if (!ptMounted && tq("pt-host") && window.Pathui) { ptMounted = true; ptH = window.Pathui.mount(tq("pt-host"), { el, lsGet, lsSet, startNet: (sc, seed, o) => { if (nlH) nlH.start(sc, seed, o); }, openCode: (id, lang) => { if (clH) clH.open(id, lang); } }); }
+    if (!llMounted && tq("ll-host") && window.Linuxlabui) { llMounted = true; llH = window.Linuxlabui.mount(tq("ll-host"), { el, lsGet, lsSet, onResult: feed }); }
+    if (!dlMounted && tq("dl-host") && window.Designlabui) { dlMounted = true; dlH = window.Designlabui.mount(tq("dl-host"), { el, lsGet, lsSet, callGemini: (p) => callGemini(p), onResult: feed }); }
+    if (!ptMounted && tq("pt-host") && window.Pathui) { ptMounted = true; ptH = window.Pathui.mount(tq("pt-host"), { el, lsGet, lsSet, startNet: (sc, seed, o) => { if (nlH) nlH.start(sc, seed, o); }, startLinux: (sc, seed, o) => { if (llH) llH.start(sc, seed, o); }, openCode: (id, lang) => { if (clH) clH.open(id, lang); }, openDesign: (id) => { if (dlH) dlH.open(id); } }); }
     const sel = tq("tr-target"), keep = sel.value;
     sel.textContent = "";
     const ts = trTargets();
