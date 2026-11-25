@@ -4,11 +4,12 @@
   "use strict";
   const P = root.Path || (typeof require !== "undefined" ? require("./path.js") : null);
   const Labs = root.Netlabs || (typeof require !== "undefined" ? require("./netlabs.js") : null);
+  const LLabs = root.Linuxlabs || (typeof require !== "undefined" ? require("./linuxlabs.js") : null);
   const KEY = "jr_path";
 
   function mount(host, env) {
     const el = env.el, lsGet = env.lsGet, lsSet = env.lsSet, doc = host.ownerDocument, rnd = env.rnd || Math.random;
-    let st = P.normalize(lsGet(KEY, null)), msg = "", offer = null;
+    let st = P.normalize(lsGet(KEY, null)), msg = "", offer = null, skipped = [];
     const save = () => { try { lsSet(KEY, st); } catch (e) { /* storage may be blocked */ } };
     const now = () => (env.now ? env.now() : Date.now());
 
@@ -17,7 +18,7 @@
       let best = null, bs = -1;
       for (let i = 0; i < 8; i++) {
         const seed = 1 + Math.floor(rnd() * 1e6);
-        let lab = null; try { lab = Labs.create(d.scenario, seed, P.labOptions(d)); } catch (e) { lab = null; }
+        let lab = null; try { lab = (d.lab === "linux" ? LLabs : Labs).create(d.scenario, seed, P.labOptions(d)); } catch (e) { lab = null; }
         if (!lab || String(lab.faultId).split("+")[0] !== d.fault || (d.double && String(lab.faultId).indexOf("+") < 0)) continue;
         const sc = P.vendorScore(st, lab.vendors); if (sc > bs) { bs = sc; best = seed; }
         if (i >= 3 && best) break;
@@ -27,13 +28,13 @@
     function launch(d) {
       if (d.kind === "net") {
         const seed = seedFor(d); if (!seed) { msg = "This drill could not be built just now. Try another one."; render(); return; }
-        P.activate(st, d); save(); render();
-        if (env.startNet) env.startNet(d.scenario, seed, P.labOptions(d));
+        skipped = []; P.activate(st, d); save(); render();
+        if (d.lab === "linux") { if (env.startLinux) env.startLinux(d.scenario, seed, P.labOptions(d)); } else if (env.startNet) env.startNet(d.scenario, seed, P.labOptions(d));
       } else {
         P.activate(st, d); save(); render();
-        if (env.openCode) env.openCode(d.task, d.lang);
+        if (d.kind === "design") { if (env.openDesign) env.openDesign(d.task); } else if (env.openCode) env.openCode(d.task, d.lang);
       }
-      const target = doc.getElementById(d.kind === "net" ? "nl-pack" : "cl-pack"); if (target && target.scrollIntoView) { try { target.scrollIntoView({ block: "start" }); } catch (e) { /* ok */ } }
+      const target = doc.getElementById(d.kind === "net" ? (d.lab === "linux" ? "ll-pack" : "nl-pack") : d.kind === "design" ? "dl-pack" : "cl-pack"); if (target && target.scrollIntoView) { try { target.scrollIntoView({ block: "start" }); } catch (e) { /* ok */ } }
     }
     function onResult(r) {
       const out = P.record(st, r, now()); save();
@@ -41,13 +42,13 @@
       const parts = [r.pass ? `Counted for ${sk.name}: +${out.xp} XP.` : `Noted for ${sk.name}. It will come back for review in a day.`];
       if (out.event) parts.push(out.event.to > out.event.from ? `${sk.name} moved up to ${P.LEVELS[out.event.to - 1]}.` : `${sk.name} moved back to ${P.LEVELS[out.event.to - 1]} to consolidate.`);
       if (out.badges && out.badges.length) parts.push("New badge: " + out.badges.join(", ") + ".");
-      msg = parts.join(" "); offer = P.next(st, now(), rnd); render();
+      msg = parts.join(" "); skipped = []; offer = P.next(st, now(), rnd); render();
     }
     function render() {
       host.textContent = ""; if (!doc) return;
       const rd = P.readiness(st);
       if (!st.started) {
-        host.appendChild(el("p", { class: "small", style: "max-width:70ch", text: "A route from first steps to expert in seven skills: OSPF, eBGP, iBGP, switching, static routing and filters, VXLAN EVPN and network automation coding. It watches how each lab goes, raises or lowers each skill's level on evidence, brings missed drills back for review and always offers the next one. Where do you want to start?" }));
+        host.appendChild(el("p", { class: "small", style: "max-width:70ch", text: "A route from first steps to expert in eleven skills: OSPF, eBGP, iBGP, switching, static routing and filters, VXLAN EVPN, Linux web, application and SSH troubleshooting, network automation coding, and design and architecture. It watches how each lab goes, raises or lowers each skill's level on evidence, brings missed drills back for review and always offers the next one. Where do you want to start?" }));
         host.appendChild(el("div", { class: "row" }, [["beginner", "New to networking"], ["working", "I work with networks"], ["senior", "Senior engineer"]].map(([k, t]) => el("button", { class: "btn", id: "pt-start-" + k, text: t, onclick: () => { P.setStart(st, k); save(); offer = P.next(st, now(), rnd); render(); } }))));
         host.appendChild(el("p", { class: "small", text: "You can still move up or down: the path follows your results, not this choice." }));
         return;
@@ -63,7 +64,7 @@
       if (d) {
         const why = d.mode === "review" ? "Review: you missed this one earlier." : d.mode === "check" ? "Level check: pass it to move up straight away." : `Next for ${P.byId(d.skill).name} at ${P.LEVELS[d.level - 1]}.`;
         host.appendChild(el("div", { class: "tr-card", id: "pt-next" }, [el("h4", { text: "Next drill: " + d.title }), el("p", { class: "small", text: why + (d.double ? " Two independent faults are present: find both." : "") + (d.kind === "code" ? ` Language: ${d.lang === "py" ? "Python" : "JavaScript"}.` : "") }),
-          el("div", { class: "row" }, [el("button", { class: "btn", id: "pt-go", text: "Start", onclick: () => launch(d) }), d.mode === "review" ? null : el("button", { class: "btn", id: "pt-other", text: "Another one", onclick: () => { offer = P.next(st, now() + 0, rnd); const o2 = offer; if (o2 && o2.id === d.id) { offer = null; } render(); } })])]));
+          el("div", { class: "row" }, [el("button", { class: "btn", id: "pt-go", text: "Start", onclick: () => launch(d) }), d.mode === "review" ? null : el("button", { class: "btn", id: "pt-other", text: "Another one", onclick: () => { skipped.push(d.skill); offer = P.next(st, now(), rnd, skipped); render(); } })])]));
       } else host.appendChild(el("p", { class: "note", text: "Every skill is at Expert. Keep the edge with free practice below." }));
       if (st.active) host.appendChild(el("p", { class: "small", id: "pt-active", text: `Drill in progress: ${P.byId(st.active.skill).name}, level ${st.active.level}. Finish it below, or start another.` }));
       const rows = el("div", { class: "pt-skills" });
