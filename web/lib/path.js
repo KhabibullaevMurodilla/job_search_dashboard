@@ -4,6 +4,7 @@
    offers the next drill. Pure logic: no DOM, no storage (the UI keeps the state). */
 (function (root) {
   "use strict";
+  const Designs = root.Designcases || (typeof require !== "undefined" ? require("./designcases.js") : null);
   const Tasks = root.Codetasks || (typeof require !== "undefined" ? require("./codetasks.js") : null);
   const DAY = 86400000;
   const LEVELS = ["Foundation", "Associate", "Professional", "Senior", "Expert track", "Expert"];
@@ -22,8 +23,16 @@
       pool: { 1: { f: ["fwd", "ret"] }, 2: { f: ["nexthop", "gw"] }, 3: { f: ["acl"] }, 4: { f: ["fwd", "ret", "nexthop", "gw"], d: 1 }, 5: { f: ["acl", "nexthop", "gw"], d: 1 } } },
     { id: "evpn", name: "VXLAN EVPN fabric", kind: "net", scenario: "evpn", needs: { ospf: 3, bgp: 3, ibgp: 2 },
       pool: { 1: { f: ["nve-shut", "src-down", "vtep-underlay"] }, 2: { f: ["vlan-vni-missing", "vni-mismatch", "af-activate"] }, 3: { f: ["extcomm", "rt-mismatch", "no-rr", "member-vni", "feature-evpn"] }, 4: { f: ["nve-shut", "src-down", "vtep-underlay"], d: 1 }, 5: { f: ["extcomm", "rt-mismatch", "no-rr", "vni-mismatch", "af-activate"], d: 1 } } },
+    { id: "lweb", name: "Linux: web servers (nginx)", kind: "net", lab: "linux", scenario: "web", needs: {},
+      pool: { 1: { f: ["not-enabled", "fw-80"] }, 2: { f: ["conf-semicolon", "port-conflict", "perm-root", "root-typo"] }, 3: { f: ["ssl-cert-path", "disk-full", "wrong-listen"] }, 4: { f: ["not-enabled", "fw-80", "conf-semicolon", "perm-root", "root-typo"], d: 1 }, 5: { f: ["ssl-cert-path", "disk-full", "wrong-listen", "port-conflict"], d: 1 } } },
+    { id: "lapp", name: "Linux: application services (systemd)", kind: "net", lab: "linux", scenario: "app", needs: { lweb: 2 },
+      pool: { 1: { f: ["proxy-port", "execstart-typo"] }, 2: { f: ["envfile-path", "app-user", "env-missing"] }, 3: { f: ["log-perm", "unit-reload", "disk-full"] }, 4: { f: ["proxy-port", "execstart-typo", "envfile-path", "app-user"], d: 1 }, 5: { f: ["env-missing", "log-perm", "unit-reload", "disk-full"], d: 1 } } },
+    { id: "lssh", name: "Linux: SSH access", kind: "net", lab: "linux", scenario: "ssh", needs: {},
+      pool: { 1: { f: ["sshd-down", "fw-ssh"] }, 2: { f: ["port-changed", "allowusers", "config-typo", "id-perm"] }, 3: { f: ["pubkey-off", "authkeys-perm", "home-perm", "wrong-key"] }, 4: { f: ["sshd-down", "fw-ssh", "port-changed", "allowusers"], d: 1 }, 5: { f: ["pubkey-off", "authkeys-perm", "home-perm", "wrong-key", "config-typo"], d: 1 } } },
     { id: "code", name: "Network automation coding", kind: "code", needs: {},
       pool: { 1: { lv: 1 }, 2: { lv: 2 }, 3: { lv: 2, other: 1 }, 4: { lv: 3 }, 5: { lv: 3, other: 1 } } },
+    { id: "design", name: "Design and architecture", kind: "design", needs: { bgp: 2, ospf: 2 },
+      pool: { 1: { lv: 1 }, 2: { lv: 2 }, 3: { lv: 3 }, 4: { lv: 4 }, 5: { lv: 5 } } },
   ];
   const byId = (id) => SKILLS.find((s) => s.id === id);
 
@@ -43,7 +52,7 @@
     s.badges = (Array.isArray(x.badges) ? x.badges : []).filter((b) => BADGES.some((q) => q.id === b)).slice(0, 30);
     for (const k of Object.keys(s.counts)) s.counts[k] = clampN(x.counts && x.counts[k], 0, 1e6);
     for (const [k, v] of Object.entries(x.vend && typeof x.vend === "object" ? x.vend : {}).slice(0, 10)) s.vend[String(k).slice(0, 10)] = clampN(v, 0, 1e6);
-    const a = x.active; if (a && typeof a === "object" && byId(a.skill)) s.active = { skill: a.skill, level: clampN(a.level, 1, 5), kind: a.kind === "code" ? "code" : "net", scenario: String(a.scenario || "").slice(0, 20), task: String(a.task || "").slice(0, 40), faults: (Array.isArray(a.faults) ? a.faults : []).map((f) => String(f).slice(0, 30)).slice(0, 12), double: a.double === true, check: a.check === true, id: String(a.id || "").slice(0, 80), mode: String(a.mode || "new").slice(0, 10) };
+    const a = x.active; if (a && typeof a === "object" && byId(a.skill)) s.active = { skill: a.skill, level: clampN(a.level, 1, 5), kind: a.kind === "code" ? "code" : a.kind === "design" ? "design" : "net", scenario: String(a.scenario || "").slice(0, 20), task: String(a.task || "").slice(0, 40), faults: (Array.isArray(a.faults) ? a.faults : []).map((f) => String(f).slice(0, 30)).slice(0, 12), double: a.double === true, check: a.check === true, id: String(a.id || "").slice(0, 80), mode: String(a.mode || "new").slice(0, 10) };
     for (const [k, v] of Object.entries(x.done && typeof x.done === "object" ? x.done : {}).slice(0, 100)) if (v && typeof v === "object") s.done[String(k).slice(0, 40)] = { py: v.py === true, js: v.js === true };
     return s;
   }
@@ -54,15 +63,17 @@
 
   // which level a free-play result belongs to when it was not started from the path
   function naturalLevel(sk, r) {
+    if (sk.kind === "design") { const c = Designs.byId(r.case); return c ? c.level : 1; }
     if (sk.kind === "code") { const t = Tasks.byId(r.task); return !t ? 1 : t.level === 1 ? 1 : t.level === 2 ? 2 : 4; }
     const ids = String(r.fault || "").split("+");
     const lvOf = (f) => { for (let L = 1; L <= 3; L++) if (!sk.pool[L].d && sk.pool[L].f.indexOf(f) >= 0) return L; return 1; };
     const m = Math.max.apply(null, ids.map(lvOf));
     return ids.length > 1 ? (m >= 3 ? 5 : 4) : m;
   }
-  function skillOf(r) { return SKILLS.find((s) => (r.kind === "code" ? s.kind === "code" : s.scenario === r.scenario)) || null; }
+  function skillOf(r) { return SKILLS.find((s) => (r.kind === "code" || r.kind === "design" ? s.kind === r.kind : s.scenario === r.scenario)) || null; }
   function matchesActive(a, r) {
     if (!a) return false;
+    if (r.kind === "design") return a.kind === "design" && a.task === r.case;
     if (r.kind === "code") return a.kind === "code" && a.task === r.task;
     return a.kind === "net" && a.scenario === r.scenario && (a.double ? String(r.fault).indexOf("+") > 0 : String(r.fault).indexOf("+") < 0);
   }
@@ -91,7 +102,7 @@
     const t = now === undefined ? Date.now() : now, sk = skillOf(r); if (!sk) return { event: null };
     const rec = state.skills[sk.id], act = matchesActive(state.active, r) && state.active.skill === sk.id ? state.active : null;
     const lv = act ? act.level : naturalLevel(sk, r), hints = clampN(r.hints, 0, 50), pass = r.pass === true;
-    const id = act && act.id ? act.id : (r.kind === "code" ? "code:" + r.task : sk.id + ":" + r.fault + ":" + lv);
+    const id = act && act.id ? act.id : (r.kind === "design" ? "design:" + r.case : r.kind === "code" ? "code:" + r.task : sk.id + ":" + r.fault + ":" + lv);
     rec.hist.push({ lv, pass, hints, at: t, id }); if (rec.hist.length > 40) { rec.hist.shift(); rec.mark = Math.max(0, rec.mark - 1); }
     rec.last = t; touchStreak(state, t);
     let xp = pass ? 10 * lv + (hints === 0 ? 5 : 0) : 2; state.xp += xp;
@@ -119,6 +130,11 @@
   function pickFrom(list, rnd) { return list[Math.floor(rnd() * list.length)]; }
   function drillFor(state, sk, level, rnd, mode, extra) {
     const p = sk.pool[level], rec = state.skills[sk.id];
+    if (sk.kind === "design") {
+      const att = {}; rec.hist.forEach((h) => { att[h.id] = (att[h.id] || 0) + 1; });
+      let cs = Designs.CASES.filter((c) => c.level === p.lv); const min = Math.min.apply(null, cs.map((c) => att["design:" + c.id] || 0)); cs = cs.filter((c) => (att["design:" + c.id] || 0) === min);
+      const c = pickFrom(cs, rnd); return { kind: "design", skill: sk.id, level, mode, task: c.id, id: "design:" + c.id, title: c.title, check: !!(extra && extra.check) };
+    }
     if (sk.kind === "code") {
       const all = Tasks.TASKS.filter((t) => t.level === p.lv), dn = (t) => state.done[t.id] || {};
       let cands = all.map((t) => ({ t, lang: p.other ? (dn(t).py && !dn(t).js ? "js" : !dn(t).py && dn(t).js ? "py" : "py") : (dn(t).py && !dn(t).js ? "js" : "py"), score: (dn(t).py ? 1 : 0) + (dn(t).js ? 1 : 0) }));
@@ -129,20 +145,22 @@
     }
     const done = {}; rec.hist.forEach((h) => { const f = h.id.split(":")[1]; if (f) done[f] = (done[f] || 0) + 1; });
     const min = Math.min.apply(null, p.f.map((f) => done[f] || 0)), faults = p.f.filter((f) => (done[f] || 0) === min), first = pickFrom(faults, rnd);
-    return { kind: "net", skill: sk.id, level, mode, scenario: sk.scenario, faults: p.d ? p.f : [first], fault: first, double: !!p.d, id: sk.id + ":" + (p.d ? "double:" : "") + first + ":" + level, title: sk.name + (p.d ? ": two faults at once" : ""), check: !!(extra && extra.check) };
+    return { kind: "net", lab: sk.lab || "net", skill: sk.id, level, mode, scenario: sk.scenario, faults: p.d ? p.f : [first], fault: first, double: !!p.d, id: sk.id + ":" + (p.d ? "double:" : "") + first + ":" + level, title: sk.name + (p.d ? ": two faults at once" : ""), check: !!(extra && extra.check) };
   }
   function reviewDue(state, now) { return Object.entries(state.srs).filter(([, r]) => r.due <= now).sort((a, b) => a[1].due - b[1].due).map(([id]) => id); }
   function fromId(state, id, rnd) {
     const parts = id.split(":");
+    if (parts[0] === "design") { const c = Designs.byId(parts[1]); return c ? { kind: "design", skill: "design", level: c.level, mode: "review", task: c.id, id, title: c.title } : null; }
     if (parts[0] === "code") { const t = Tasks.byId(parts[1]); return t ? { kind: "code", skill: "code", level: 1, mode: "review", task: t.id, lang: state.done[t.id] && state.done[t.id].py && !state.done[t.id].js ? "js" : "py", id, title: t.title } : null; }
     const sk = byId(parts[0]); if (!sk) return null;
     const lv = clampN(parts[parts.length - 1], 1, 5), dbl = parts[1] === "double", f = parts[dbl ? 2 : 1];
-    return { kind: "net", skill: sk.id, level: lv, mode: "review", scenario: sk.scenario, faults: [f], fault: f, double: dbl, id, title: sk.name + (dbl ? ": two faults at once" : "") };
+    return { kind: "net", lab: sk.lab || "net", skill: sk.id, level: lv, mode: "review", scenario: sk.scenario, faults: [f], fault: f, double: dbl, id, title: sk.name + (dbl ? ": two faults at once" : "") };
   }
-  function next(state, now, rnd) {
+  function next(state, now, rnd, exclude) {
     const t = now === undefined ? Date.now() : now, r = rnd || Math.random;
     for (const id of reviewDue(state, t)) { const d = fromId(state, id, r); if (d && unlocked(state, byId(d.skill))) return d; }
-    const open = SKILLS.filter((s) => unlocked(state, s) && state.skills[s.id].level < MAXL);
+    let open = SKILLS.filter((s) => unlocked(state, s) && state.skills[s.id].level < MAXL);
+    if (exclude && exclude.length) { const rest = open.filter((s) => exclude.indexOf(s.id) < 0); if (rest.length) open = rest; }
     if (!open.length) return null;
     open.sort((a, b) => state.skills[a.id].level - state.skills[b.id].level || state.skills[a.id].last - state.skills[b.id].last);
     const sk = open[0];
