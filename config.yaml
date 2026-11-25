@@ -49,12 +49,57 @@ titles:
     - Helpdesk Technician
     - Support Specialist
     - Pre-Sales Engineer
+    - Cloud Network Engineer
+    - Cloud Migration Engineer
+    - FinOps Engineer
+    - Cloud Cost Engineer
+    - Data Infrastructure Engineer
+    - AI/ML Infrastructure Engineer
+    - MLOps Engineer
+    - Windows Systems Administrator
+    - Windows Systems Engineer
+    - Middleware Engineer
+    - Containerization Engineer
+    - Disaster Recovery Engineer
+    - Configuration Management Engineer
+    - Database Administrator
+    - Identity and Access Management Engineer
+    - Edge Computing Engineer
+    - Principal DevOps Engineer
+    - Staff DevOps Engineer
+    - Enterprise Architect
+    - Desktop Support Technician
+    - NOC Technician
+    - NOC Engineer
+    - SOC Analyst
+    - Technical Account Manager
+    - Customer Success Manager
+    - Solutions Consultant
+    - IT Asset Manager
+    - Field Service Technician
+    - Receptionist
+    - Chef
+    - Housekeeper
+    - Sous Chef
+    - Line Cook
+    - Prep Cook
+    - Pastry Chef
+    - Concierge
+    - Front Desk Agent
+    - Night Auditor
+    - Facilities Manager
+    - Maintenance Technician
+    - Room Attendant
+    - Laundry Attendant
+    - Food and Beverage Manager
   # Titles to never show you, even if they match above.
   exclude:
     - UK Citizen Only
     - EU Citizen Only
     - Security Clearance Required
     - US Citizen Only
+    - SC Required
+    - DV Required
 
 locations:
   countries:
