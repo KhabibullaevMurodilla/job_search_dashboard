@@ -32,17 +32,21 @@
   // ---------------------------------------------------------------
   // Filtering and sorting the role list.
   // ---------------------------------------------------------------
-  function filterRoles(roles, filters, statusByUid) {
+  // fitOf(role) returns the role's CV match percent, or null when it has none; roles without one
+  // cannot meet a minimum CV match, so they are left out only while that filter is above zero.
+  function filterRoles(roles, filters, statusByUid, fitOf) {
     const f = filters || {};
     const q = (f.search || "").trim().toLowerCase();
     const minScore = f.minScore != null ? f.minScore : 0;
     const status = f.status || "all"; // all | new | applied | skipped
+    const minFit = fitOf && f.minFit > 0 ? f.minFit : 0;
     return roles.filter((r) => {
       if (status !== "all") {
         const st = (statusByUid && statusByUid[r.uid]) || "new";
         if (st !== status) return false;
       }
       if ((r.score || 0) < minScore) return false;
+      if (minFit) { const fit = fitOf(r); if (fit == null || fit < minFit) return false; }
       if (f.workMode && f.workMode !== "any" && r.work_mode !== f.workMode) {
         return false;
       }
