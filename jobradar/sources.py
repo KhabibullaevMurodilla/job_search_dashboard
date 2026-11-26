@@ -46,7 +46,7 @@ def load_file(path: str | Path) -> list[Source]:
 # than for the exact words "engineering manager", and the cut was made without
 # saying so, which is the same silent truncation this tool keeps finding
 # elsewhere. `dropped_titles` exists so the caller can say what it skipped.
-MAX_KEYWORD_TITLES = 12
+MAX_KEYWORD_TITLES = 1000
 
 
 def dropped_titles(titles: list[str]) -> list[str]:
