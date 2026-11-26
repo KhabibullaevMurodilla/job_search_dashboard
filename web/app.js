@@ -82,7 +82,7 @@
     openApps: new Set(),
     pasteRec: null,         // the application made from the pasted posting, if any
     evalCache: new Map(),   // uid -> evaluateJob() result, recomputed when CV changes
-    filters: { search: "", minScore: 0, workMode: "any", country: "any", status: "all" },
+    filters: { search: "", minScore: 0, minFit: 0, workMode: "any", country: "any", status: "all" },
     sortBy: "score",
   };
 
@@ -352,7 +352,11 @@ copied from the account either. Write in a professional register.`;
   function render() {
     const list = document.getElementById("role-list");
     list.innerHTML = "";
-    const filtered = DC.filterRoles(state.roles, state.filters, state.statusByUid);
+    const fitOf = (r) => { const f = (state.evalCache.get(r.uid) || {}).cvFit; return f && f.percent != null ? f.percent : null; };
+    const hasCv = state.cvText.trim().length > 0, useFit = hasCv && state.filters.minFit > 0;
+    const filtered = DC.filterRoles(state.roles, state.filters, state.statusByUid, useFit ? fitOf : null);
+    const fitNote = document.getElementById("min-fit-note");
+    if (fitNote) fitNote.textContent = state.filters.minFit > 0 && !hasCv ? "Save your CV (CV tab) and this filter will start working. Until then it hides nothing." : useFit ? `${DC.filterRoles(state.roles, Object.assign({}, state.filters, { minFit: 0 }), state.statusByUid).length - filtered.length} roles hidden by this filter.` : "";
     let sorted = DC.sortRoles(filtered, state.sortBy);
     if (state.sortBy === "cvfit") {
       const pct = (r) => ((state.evalCache.get(r.uid) || {}).cvFit || {}).percent;
@@ -1806,6 +1810,11 @@ copied from the account either. Write in a professional register.`;
     document.getElementById("min-score").addEventListener("input", (e) => {
       state.filters.minScore = Number(e.target.value) || 0;
       document.getElementById("min-score-label").textContent = state.filters.minScore;
+      render();
+    });
+    document.getElementById("min-fit").addEventListener("input", (e) => {
+      state.filters.minFit = Number(e.target.value) || 0;
+      document.getElementById("min-fit-label").textContent = state.filters.minFit;
       render();
     });
     document.getElementById("status-filter").addEventListener("change", (e) => {
