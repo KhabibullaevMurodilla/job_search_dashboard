@@ -344,6 +344,9 @@
       <input type="text" id="search" placeholder="title, company, location">
       <label for="min-score">Minimum score: <span id="min-score-label">0</span></label>
       <input type="range" id="min-score" min="0" max="100" value="0">
+      <label for="min-fit">Minimum CV match: <span id="min-fit-label">0</span></label>
+      <input type="range" id="min-fit" min="0" max="100" step="5" value="0" aria-describedby="min-fit-note">
+      <div class="small" id="min-fit-note" role="status"></div>
       <label for="status-filter">Status</label>
       <select id="status-filter">
         <option value="all">All</option>
@@ -483,7 +486,7 @@
     <section id="view-train" role="tabpanel" aria-labelledby="tab-train" hidden>
       <p class="small" style="max-width:70ch">Practice for the interview and the tests that follow an application. Pick a saved role or a PhD programme. Questions, practical tasks and follow-ups are built from that posting or advert and checked against your own CV and background, so the practice is aimed at what you will really be asked and where you are really weak. Your answers go to Gemini with your own key. Progress stays in this browser.</p>
       <div class="pack" id="pt-pack">
-        <h4>Training</h4>
+        <h4>Path to expert</h4>
         <div id="pt-host"></div>
       </div>
       <div class="pack" id="nl-pack">
